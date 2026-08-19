@@ -4,7 +4,7 @@
 #include "screens/HUDEditor.h"
 #include "screens/SkinStealerScreen.h"
 
-#include "screens/ModSuiteScreen.h"
+#include "screens/NexusScreen.h"
 #include "screens/XRayScreen.h"
 
 #include "client/manager/StaticManager.h"
@@ -18,7 +18,7 @@
 
 class ScreenManager : public Listener,
                       public StaticManager<Screen, ClickGUI, HUDEditor, SkinStealerScreen, GyroCalibrationScreen,
-                                           ModSuiteScreen, XRayScreen> {
+                                           NexusScreen, XRayScreen> {
 public:
     ScreenManager();
 

@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "ModSuiteScreen.h"
+#include "NexusScreen.h"
 
 #include "client/event/Eventing.h"
 #include "client/event/events/RenderOverlayEvent.h"
@@ -8,24 +8,25 @@
 #include "util/DrawContext.h"
 
 #include "XRayScreen.h"
+#include "client/feature/nexus/NexusConfig.h"
 
-ModSuiteScreen::ModSuiteScreen() {
-    // Temporary default.
-    // We will make this configurable after the base screen is working.
-    this->key = KeyValue('N');
+NexusScreen::NexusScreen() {
+    Nexus::NexusConfig::load();
 
-    Eventing::get().listen<RenderOverlayEvent>(this, (EventListenerFunc)&ModSuiteScreen::onRender, 1, true);
+    this->key = KeyValue(Nexus::NexusConfig::menuKey);
+
+    Eventing::get().listen<RenderOverlayEvent>(this, (EventListenerFunc)&NexusScreen::onRender, 1, true);
 }
 
-void ModSuiteScreen::onEnable(bool) {
+void NexusScreen::onEnable(bool) {
     resetInputState();
 }
 
-void ModSuiteScreen::onDisable() {
+void NexusScreen::onDisable() {
     resetInputState();
 }
 
-void ModSuiteScreen::onRender(Event&) {
+void NexusScreen::onRender(Event&) {
     if (!isActive()) return;
 
     D2DUtil dc;
@@ -67,8 +68,8 @@ void ModSuiteScreen::onRender(Event&) {
     d2d::Rect titleRect = { panelRect.left + padding, panelRect.top + 16.0f * scale, panelRect.right - padding,
                             panelRect.top + 58.0f * scale };
 
-    dc.drawText(titleRect, L"Bedrock Mod Suite", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryLight,
-                28.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, false);
+    dc.drawText(titleRect, L"Nexus", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryLight, 28.0f * scale,
+                DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, false);
 
     //
     // SUBTITLE
@@ -141,7 +142,8 @@ void ModSuiteScreen::onRender(Event&) {
     d2d::Rect versionRect = { panelRect.left + padding, panelRect.bottom - 38.0f * scale, panelRect.right - padding,
                               panelRect.bottom - 12.0f * scale };
 
-    dc.drawText(versionRect, L"Bedrock Mod Suite v0.1.0", d2d::Color::RGB(0xA0, 0xA0, 0xA0).asAlpha(0.70f),
+    dc.drawText(versionRect, L"Nexus v0.1.0", d2d::Color::RGB(0xA0, 0xA0, 0xA0).asAlpha(0.70f),
                 Renderer::FontSelection::PrimaryRegular, 12.0f * scale, DWRITE_TEXT_ALIGNMENT_TRAILING,
                 DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 }
+

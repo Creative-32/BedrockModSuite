@@ -2,11 +2,11 @@
 
 #include "../Screen.h"
 
-class ModSuiteScreen final : public Screen {
+class NexusScreen final : public Screen {
 public:
-    ModSuiteScreen();
+    NexusScreen();
 
-    std::string getName() override { return "ModSuite"; }
+    std::string getName() override { return "Nexus"; }
 
 protected:
     void onEnable(bool ignoreAnimations) override;
