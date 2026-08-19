@@ -4,7 +4,10 @@
 #include "client/event/Eventing.h"
 #include "client/event/events/RenderOverlayEvent.h"
 #include "client/Latite.h"
+#include "client/screen/ScreenManager.h"
 #include "util/DrawContext.h"
+
+#include "XRayScreen.h"
 
 ModSuiteScreen::ModSuiteScreen() {
     // Temporary default.
@@ -97,19 +100,28 @@ void ModSuiteScreen::onRender(Event&) {
 
         d2d::Rect cardRect = { left, top, left + cardWidth, top + cardHeight };
 
-        d2d::Color cardColor = d2d::Color::RGB(0x18, 0x18, 0x18).asAlpha(0.95f);
+        bool hovering = shouldSelect(cardRect, SDK::ClientInstance::get()->cursorPos);
 
-        d2d::Color cardOutline = d2d::Color::RGB(0x50, 0x50, 0x50).asAlpha(0.65f);
+        d2d::Color cardColor = hovering ? d2d::Color::RGB(0x28, 0x28, 0x28) : d2d::Color::RGB(0x18, 0x18, 0x18);
 
         dc.fillRoundedRectangle(cardRect, cardColor, 12.0f * scale);
 
-        dc.drawRoundedRectangle(cardRect, cardOutline, 12.0f * scale, 1.0f * scale);
+        dc.drawRoundedRectangle(cardRect, d2d::Color::RGB(0x50, 0x50, 0x50).asAlpha(0.65f), 12.0f * scale,
+                                1.0f * scale);
 
         dc.drawText(cardRect, name, d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular, 18.0f * scale,
                     DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        return cardRect;
     };
 
-    drawCard(0, 0, L"X-Ray");
+    auto xRayCard = drawCard(0, 0, L"X-Ray");
+
+    if (shouldSelect(xRayCard, SDK::ClientInstance::get()->cursorPos) && justClicked[0]) {
+        playClickSound();
+
+        Latite::getScreenManager().showScreen<XRayScreen>();
+    }
 
     drawCard(1, 0, L"Light Levels");
 

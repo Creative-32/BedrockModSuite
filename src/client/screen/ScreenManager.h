@@ -3,7 +3,9 @@
 #include "screens/GyroCalibrationScreen.h"
 #include "screens/HUDEditor.h"
 #include "screens/SkinStealerScreen.h"
+
 #include "screens/ModSuiteScreen.h"
+#include "screens/XRayScreen.h"
 
 #include "client/manager/StaticManager.h"
 #include "client/event/Listener.h"
@@ -21,7 +23,7 @@ class ScreenManager : public Listener,
           HUDEditor,
           SkinStealerScreen,
           GyroCalibrationScreen,
-          ModSuiteScreen
+          ModSuiteScreen, XRayScreen
       > {
 public:
     ScreenManager();
