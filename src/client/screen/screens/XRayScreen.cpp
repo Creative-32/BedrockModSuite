@@ -104,5 +104,6 @@ void XRayScreen::onRender(Event&) {
         playClickSound();
 
         Latite::getScreenManager().showScreen<ModSuiteScreen>();
+        return;
     }
 }

@@ -17,14 +17,8 @@
 #include <atomic>
 
 class ScreenManager : public Listener,
-      public StaticManager<
-          Screen,
-          ClickGUI,
-          HUDEditor,
-          SkinStealerScreen,
-          GyroCalibrationScreen,
-          ModSuiteScreen, XRayScreen
-      > {
+                      public StaticManager<Screen, ClickGUI, HUDEditor, SkinStealerScreen, GyroCalibrationScreen,
+                                           ModSuiteScreen, XRayScreen> {
 public:
     ScreenManager();
 

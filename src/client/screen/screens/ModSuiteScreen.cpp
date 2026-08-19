@@ -121,6 +121,7 @@ void ModSuiteScreen::onRender(Event&) {
         playClickSound();
 
         Latite::getScreenManager().showScreen<XRayScreen>();
+        return;
     }
 
     drawCard(1, 0, L"Light Levels");
