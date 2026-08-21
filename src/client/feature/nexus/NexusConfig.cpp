@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include "module/NexusModuleRegistry.h"
 
 namespace Nexus {
 
@@ -42,6 +43,28 @@ std::filesystem::path NexusConfig::getConfigPath() {
             file >> json;
 
             menuKey = json.value("menuKey", static_cast<int>('N'));
+
+            std::string viewModeValue = json.value("viewMode", std::string("list"));
+
+            if (viewModeValue == "medium") {
+                viewMode = NexusViewMode::Medium;
+            } else if (viewModeValue == "compact") {
+                viewMode = NexusViewMode::Compact;
+            } else {
+                viewMode = NexusViewMode::List;
+            }
+
+            favoriteOrder.clear();
+
+            if (json.contains("favoriteOrder") && json["favoriteOrder"].is_array()) {
+                for (const auto& entry : json["favoriteOrder"]) {
+                    if (entry.is_string()) {
+                        favoriteOrder.push_back(entry.get<std::string>());
+                    }
+                }
+            }
+
+            sanitizeFavoriteOrder();
 
             if (json.contains("xray") && json["xray"].is_object()) {
                 const auto& xray = json["xray"];
@@ -88,8 +111,9 @@ std::filesystem::path NexusConfig::getConfigPath() {
             }
         } catch (...) {
             menuKey = 'N';
+            viewMode = NexusViewMode::List;
+            favoriteOrder.clear();
             xRaySettings = XRaySettings {};
-
             save();
         }
     }
@@ -104,8 +128,27 @@ std::filesystem::path NexusConfig::getConfigPath() {
 
         nlohmann::json json;
 
-        json["version"] = 1;
+        json["version"] = 3;
         json["menuKey"] = menuKey;
+
+        switch (viewMode) {
+        case NexusViewMode::Medium:
+            json["viewMode"] = "medium";
+            break;
+
+        case NexusViewMode::Compact:
+            json["viewMode"] = "compact";
+            break;
+
+        case NexusViewMode::List:
+        default:
+            json["viewMode"] = "list";
+            break;
+        }
+
+        sanitizeFavoriteOrder();
+
+        json["favoriteOrder"] = favoriteOrder;
 
         json["xray"] = { { "enabled", xRaySettings.enabled },
                          { "oreESP", xRaySettings.oreESP },
@@ -136,5 +179,80 @@ std::filesystem::path NexusConfig::getConfigPath() {
 
         file << json.dump(4);
     }
+
+bool NexusConfig::isFavorite(const std::string& moduleId) {
+    load();
+
+    return std::find(favoriteOrder.begin(), favoriteOrder.end(), moduleId) != favoriteOrder.end();
+}
+
+void NexusConfig::setFavorite(const std::string& moduleId, bool favorite) {
+    load();
+
+    const auto* module = NexusModuleRegistry::find(moduleId);
+
+    if (module == nullptr || !module->canFavorite) {
+        return;
+    }
+
+    auto it = std::find(favoriteOrder.begin(), favoriteOrder.end(), moduleId);
+
+    if (favorite) {
+        if (it == favoriteOrder.end()) {
+            favoriteOrder.push_back(moduleId);
+        }
+    } else {
+        if (it != favoriteOrder.end()) {
+            favoriteOrder.erase(it);
+        }
+    }
+
+    save();
+}
+
+void NexusConfig::moveFavorite(const std::string& moduleId, std::size_t newIndex) {
+    load();
+
+    auto it = std::find(favoriteOrder.begin(), favoriteOrder.end(), moduleId);
+
+    if (it == favoriteOrder.end()) {
+        return;
+    }
+
+    std::string id = *it;
+
+    favoriteOrder.erase(it);
+
+    newIndex = std::min(newIndex, favoriteOrder.size());
+
+    favoriteOrder.insert(favoriteOrder.begin() + newIndex, id);
+
+    save();
+}
+
+const std::vector<std::string>& NexusConfig::getFavoriteOrder() {
+    load();
+    return favoriteOrder;
+}
+
+void NexusConfig::sanitizeFavoriteOrder() {
+    std::vector<std::string> cleaned;
+
+    for (const auto& id : favoriteOrder) {
+        const auto* module = NexusModuleRegistry::find(id);
+
+        if (module == nullptr || !module->canFavorite) {
+            continue;
+        }
+
+        if (std::find(cleaned.begin(), cleaned.end(), id) != cleaned.end()) {
+            continue;
+        }
+
+        cleaned.push_back(id);
+    }
+
+    favoriteOrder = std::move(cleaned);
+}
 
 } // namespace Nexus

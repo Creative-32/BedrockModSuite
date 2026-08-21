@@ -73,21 +73,26 @@ void TextBox::render(DrawUtil& dc, float rounding, d2d::Color backgroundColor, d
         dc.fillRoundedRectangle(rect, backgroundColor, rounding);
     }
 
-    // draw text
     float textSize = rect.getHeight() * 0.7f;
-    dc.drawText(rect, getText(), textColor, Renderer::FontSelection::PrimaryRegular, textSize, textAlignment,
-                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, false); // Don't cache
 
-    // draw blinker
+    d2d::Rect textRect = rect;
+    textRect.left += 10.0f;
+    textRect.right -= 10.0f;
+
+    dc.drawText(textRect, getText(), textColor, Renderer::FontSelection::PrimaryRegular, textSize, textAlignment,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, false);
+
     Vec2 ts = dc.getTextSize(text.substr(0, this->place), Renderer::FontSelection::PrimaryRegular, textSize);
     const bool rtl = isRightToLeftText();
+
     float blinkerX = 0.f;
     if (textAlignment == DWRITE_TEXT_ALIGNMENT_CENTER) {
         float fullTextWidth = dc.getTextSize(text, Renderer::FontSelection::PrimaryRegular, textSize).x;
-        blinkerX = rect.centerX() - (fullTextWidth / 2.f) + ts.x;
+        blinkerX = textRect.centerX() - (fullTextWidth / 2.f) + ts.x;
     } else {
-        blinkerX = rtl ? rect.right - ts.x - 2.f : rect.left + ts.x;
+        blinkerX = rtl ? textRect.right - ts.x - 2.f : textRect.left + ts.x;
     }
+
     d2d::Rect blinkerRect = { blinkerX, rect.top + 2.f, blinkerX + 2.f, rect.bottom - 2.f };
     if (isSelected() && shouldBlink()) dc.fillRectangle(blinkerRect, textColor);
 }
