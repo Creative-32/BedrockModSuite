@@ -17,6 +17,7 @@
 #include "client/feature/nexus/ui/NexusControls.h"
 #include "client/feature/nexus/xray/XRaySettings.h"
 #include "client/feature/nexus/notification/NexusNotificationManager.h"
+#include "client/feature/nexus/xray/XRayScanner.h"
 
 #include "util/DrawContext.h"
 
@@ -28,6 +29,7 @@
 NexusScreen::NexusScreen() {
     Nexus::NexusConfig::load();
     Nexus::NexusNotificationManager::initialize();
+    Nexus::XRayScanner::initialize();
 
     this->key = KeyValue(Nexus::NexusConfig::menuKey);
 

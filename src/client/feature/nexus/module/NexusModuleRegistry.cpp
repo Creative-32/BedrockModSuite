@@ -13,6 +13,9 @@ namespace Nexus {
                     { "light_levels", L"Light Levels", L"Visualize block light levels.", NexusCategory::World,
                       NexusModulePolicy::ClientOnly },
 
+                    { "dynamic_light", L"Dynamic Light", L"Make held light-emitting items illuminate the area around you.",
+                      NexusCategory::World, NexusModulePolicy::ClientOnly },
+
                     { "build_guide", L"BuildGuide", L"Render shapes and construction guides.", NexusCategory::Building,
                       NexusModulePolicy::ClientOnly },
 
@@ -29,7 +32,15 @@ namespace Nexus {
                       NexusCategory::Entities, NexusModulePolicy::ClientOnly },
 
                     { "chest_tools", L"Chest Tools", L"Sorting and utility tools for opened containers.",
-                      NexusCategory::Inventory, NexusModulePolicy::ClientOnly } };
+                      NexusCategory::Inventory, NexusModulePolicy::ClientOnly },
+
+                    { "map", L"Map", L"View explored terrain, waypoints, and player position.",
+                      NexusCategory::World, NexusModulePolicy::ClientOnly },};
+
+
+
+
+
     }
 
     const std::vector<NexusModuleInfo>& NexusModuleRegistry::getModules() {
