@@ -110,19 +110,89 @@ namespace Nexus {
         pruneCachedOres(center, range);
     }
 
-    bool XRayScanner::isDiamondOre(SDK::Block* block) const {
+    std::optional<XRayScanner::OreType> XRayScanner::classifyOre(SDK::Block* block) const {
         if (!block || !block->legacyBlock) {
-            return false;
+            return std::nullopt;
         }
 
         std::string id = block->legacyBlock->namespacedId.getString();
 
-        return id == "minecraft:diamond_ore" || id == "minecraft:deepslate_diamond_ore";
+        if (id == "minecraft:diamond_ore" || id == "minecraft:deepslate_diamond_ore") {
+            return OreType::Diamond;
+        }
+
+        if (id == "minecraft:emerald_ore" || id == "minecraft:deepslate_emerald_ore") {
+            return OreType::Emerald;
+        }
+
+        if (id == "minecraft:gold_ore" || id == "minecraft:deepslate_gold_ore" || id == "minecraft:nether_gold_ore") {
+            return OreType::Gold;
+        }
+
+        if (id == "minecraft:iron_ore" || id == "minecraft:deepslate_iron_ore") {
+            return OreType::Iron;
+        }
+
+        if (id == "minecraft:redstone_ore" || id == "minecraft:deepslate_redstone_ore" ||
+            id == "minecraft:lit_redstone_ore") {
+            return OreType::Redstone;
+        }
+
+        if (id == "minecraft:lapis_ore" || id == "minecraft:deepslate_lapis_ore") {
+            return OreType::Lapis;
+        }
+
+        if (id == "minecraft:coal_ore" || id == "minecraft:deepslate_coal_ore") {
+            return OreType::Coal;
+        }
+
+        if (id == "minecraft:copper_ore" || id == "minecraft:deepslate_copper_ore") {
+            return OreType::Copper;
+        }
+
+        if (id == "minecraft:ancient_debris") {
+            return OreType::AncientDebris;
+        }
+
+        return std::nullopt;
+    }
+
+    bool XRayScanner::isOreEnabled(OreType type) const {
+        switch (type) {
+        case OreType::Diamond:
+            return xRaySettings.diamond;
+
+        case OreType::Emerald:
+            return xRaySettings.emerald;
+
+        case OreType::Gold:
+            return xRaySettings.gold;
+
+        case OreType::Iron:
+            return xRaySettings.iron;
+
+        case OreType::Redstone:
+            return xRaySettings.redstone;
+
+        case OreType::Lapis:
+            return xRaySettings.lapis;
+
+        case OreType::Coal:
+            return xRaySettings.coal;
+
+        case OreType::Copper:
+            return xRaySettings.copper;
+
+        case OreType::AncientDebris:
+            return xRaySettings.ancientDebris;
+        }
+
+        return false;
     }
 
     bool XRayScanner::containsOre(BlockPos const& pos) const {
-        for (auto const& ore : diamondOres) {
-            if (ore.x == pos.x && ore.y == pos.y && ore.z == pos.z) {
+        for (auto const& ore : ores) {
+            if (ore.pos.x == pos.x && ore.pos.y == pos.y && ore.pos.z == pos.z) {
                 return true;
             }
         }
@@ -130,64 +200,67 @@ namespace Nexus {
         return false;
     }
 
-    void XRayScanner::addOre(BlockPos const& pos) {
-        if (containsOre(pos)) {
-            return;
+    void XRayScanner::addOre(BlockPos const& pos, OreType type) {
+        for (auto& ore : ores) {
+            if (ore.pos.x == pos.x && ore.pos.y == pos.y && ore.pos.z == pos.z) {
+                ore.type = type;
+                return;
+            }
         }
 
-        diamondOres.push_back(pos);
+        ores.push_back({ pos, type });
     }
 
     void XRayScanner::pruneCachedOres(BlockPos const& center, int range) {
-        //
-        // Keep a small margin so boxes do not constantly disappear
-        // when the player walks a couple blocks.
-        //
         int keepRange = range + RecenterDistance;
 
         long long keepRangeSq = static_cast<long long>(keepRange) * static_cast<long long>(keepRange);
 
-        std::erase_if(diamondOres, [&](BlockPos const& pos) {
-            long long dx = static_cast<long long>(pos.x) - center.x;
+        std::erase_if(ores, [&](OreHit const& ore) {
+            long long dx = static_cast<long long>(ore.pos.x) - center.x;
 
-            long long dy = static_cast<long long>(pos.y) - center.y;
+            long long dy = static_cast<long long>(ore.pos.y) - center.y;
 
-            long long dz = static_cast<long long>(pos.z) - center.z;
+            long long dz = static_cast<long long>(ore.pos.z) - center.z;
 
             long long distanceSq = dx * dx + dy * dy + dz * dz;
 
             return distanceSq > keepRangeSq;
         });
 
-        if (validationIndex >= diamondOres.size()) {
+        if (validationIndex >= ores.size()) {
             validationIndex = 0;
         }
     }
 
     void XRayScanner::validateCachedOres(SDK::BlockSource* region) {
-        if (!region || diamondOres.empty()) {
+        if (!region || ores.empty()) {
             validationIndex = 0;
             return;
         }
 
         int checked = 0;
 
-        while (checked < ValidationPerTick && !diamondOres.empty()) {
-            if (validationIndex >= diamondOres.size()) {
+        while (checked < ValidationPerTick && !ores.empty()) {
+            if (validationIndex >= ores.size()) {
                 validationIndex = 0;
             }
 
-            BlockPos const pos = diamondOres[validationIndex];
+            BlockPos const pos = ores[validationIndex].pos;
 
             SDK::Block* block = region->getBlock(pos);
 
-            if (!isDiamondOre(block)) {
-                diamondOres.erase(diamondOres.begin() + static_cast<std::ptrdiff_t>(validationIndex));
+            auto type = classifyOre(block);
 
-                if (validationIndex >= diamondOres.size()) {
+            if (!type.has_value()) {
+                ores.erase(ores.begin() + static_cast<std::ptrdiff_t>(validationIndex));
+
+                if (validationIndex >= ores.size()) {
                     validationIndex = 0;
                 }
             } else {
+                ores[validationIndex].type = *type;
+
                 ++validationIndex;
             }
 
@@ -275,8 +348,10 @@ namespace Nexus {
                 continue;
             }
 
-            if (isDiamondOre(block)) {
-                addOre(pos);
+            auto oreType = classifyOre(block);
+
+            if (oreType.has_value()) {
+                addOre(pos, *oreType);
             }
         }
     }
@@ -288,7 +363,7 @@ namespace Nexus {
         // No active world.
         //
         if (!tick.getLevel()) {
-            diamondOres.clear();
+            ores.clear();
 
             scanInitialized = false;
             validationIndex = 0;
@@ -296,13 +371,8 @@ namespace Nexus {
             return;
         }
 
-        //
-        // First proof-of-concept:
-        //
-        // Master X-Ray + Ore ESP + Diamond must all be enabled.
-        //
-        if (!xRaySettings.enabled || !xRaySettings.oreESP || !xRaySettings.diamond) {
-            diamondOres.clear();
+        if (!xRaySettings.enabled || !xRaySettings.oreESP) {
+            ores.clear();
 
             scanInitialized = false;
             validationIndex = 0;
@@ -352,7 +422,7 @@ namespace Nexus {
     }
 
     void XRayScanner::onRender(Event& event) {
-        if (!xRaySettings.enabled || !xRaySettings.oreESP || !xRaySettings.diamond || diamondOres.empty()) {
+        if (!xRaySettings.enabled || !xRaySettings.oreESP || ores.empty()) {
             return;
         }
 
@@ -376,21 +446,62 @@ namespace Nexus {
         //
         MCDrawUtil3D dc { clientInstance->levelRenderer, screenContext, SDK::MaterialPtr::getUIColor() };
 
-        d2d::Color outlineColor = d2d::Color::RGB(0x42, 0xE6, 0xD5).asAlpha(0.95f);
+        auto getColor = [](OreType type) -> d2d::Color {
+            switch (type) {
+            case OreType::Diamond:
+                return d2d::Color::RGB(0x42, 0xE6, 0xD5);
 
-        d2d::Color fillColor = d2d::Color::RGB(0x42, 0xE6, 0xD5).asAlpha(0.18f);
+            case OreType::Emerald:
+                return d2d::Color::RGB(0x35, 0xD0, 0x63);
+
+            case OreType::Gold:
+                return d2d::Color::RGB(0xF5, 0xD4, 0x42);
+
+            case OreType::Iron:
+                return d2d::Color::RGB(0xD8, 0xC5, 0xB0);
+
+            case OreType::Redstone:
+                return d2d::Color::RGB(0xE0, 0x35, 0x35);
+
+            case OreType::Lapis:
+                return d2d::Color::RGB(0x38, 0x68, 0xD8);
+
+            case OreType::Coal:
+                return d2d::Color::RGB(0x70, 0x70, 0x70);
+
+            case OreType::Copper:
+                return d2d::Color::RGB(0xD7, 0x7A, 0x45);
+
+            case OreType::AncientDebris:
+                return d2d::Color::RGB(0x9C, 0x64, 0x4B);
+            }
+
+            return d2d::Colors::WHITE;
+        };
 
         if (xRaySettings.outline) {
-            for (auto const& pos : diamondOres) {
-                drawOutlineBlock(dc, pos, outlineColor);
+            for (auto const& ore : ores) {
+                if (!isOreEnabled(ore.type)) {
+                    continue;
+                }
+
+                d2d::Color color = getColor(ore.type).asAlpha(0.95f);
+
+                drawOutlineBlock(dc, ore.pos, color);
             }
 
             dc.flush();
         }
 
         if (xRaySettings.fill) {
-            for (auto const& pos : diamondOres) {
-                drawFilledBlock(dc, pos, fillColor);
+            for (auto const& ore : ores) {
+                if (!isOreEnabled(ore.type)) {
+                    continue;
+                }
+
+                d2d::Color color = getColor(ore.type).asAlpha(0.18f);
+
+                drawFilledBlock(dc, ore.pos, color);
             }
 
             dc.flush();

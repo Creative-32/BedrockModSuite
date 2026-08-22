@@ -5,6 +5,7 @@
 #include "util/LMath.h"
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace SDK {
@@ -24,25 +25,6 @@ namespace Nexus {
         }
 
     private:
-        XRayScanner();
-
-        static XRayScanner& instance();
-
-        void onTick(Event& event);
-        void onRender(Event& event);
-
-        void resetScan(BlockPos const& center, int range);
-        void scanBlocks(SDK::BlockSource* region);
-        void validateCachedOres(SDK::BlockSource* region);
-        void pruneCachedOres(BlockPos const& center, int range);
-
-        bool isDiamondOre(SDK::Block* block) const;
-
-        bool containsOre(BlockPos const& pos) const;
-        void addOre(BlockPos const& pos);
-
-        static int centeredOffset(int index);
-
         enum class OreType {
             Diamond,
             Emerald,
@@ -59,6 +41,26 @@ namespace Nexus {
             BlockPos pos;
             OreType type;
         };
+
+        XRayScanner();
+
+        static XRayScanner& instance();
+
+        void onTick(Event& event);
+        void onRender(Event& event);
+
+        void resetScan(BlockPos const& center, int range);
+        void scanBlocks(SDK::BlockSource* region);
+        void validateCachedOres(SDK::BlockSource* region);
+        void pruneCachedOres(BlockPos const& center, int range);
+
+        std::optional<OreType> classifyOre(SDK::Block* block) const;
+        bool isOreEnabled(OreType type) const;
+
+        bool containsOre(BlockPos const& pos) const;
+        void addOre(BlockPos const& pos, OreType type);
+
+        static int centeredOffset(int index);
 
         std::vector<OreHit> ores {};
 
