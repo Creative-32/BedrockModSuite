@@ -5,7 +5,10 @@
 #include "util/LMath.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace SDK {
@@ -44,6 +47,39 @@ namespace Nexus {
 
         struct CaveHit {
             BlockPos pos;
+
+            //
+            // Structural cave shell.
+            //
+            std::uint8_t faces = 0;
+
+            //
+            // View-dependent subset of structural faces that are
+            // currently hidden behind terrain.
+            //
+            std::uint8_t occludedFaces = 0;
+        };
+
+        struct BlockKey {
+            int x;
+            int y;
+            int z;
+
+            bool operator==(BlockKey const& other) const noexcept {
+                return x == other.x && y == other.y && z == other.z;
+            }
+        };
+
+        struct BlockKeyHash {
+            std::size_t operator()(BlockKey const& key) const noexcept {
+                std::size_t h = std::hash<int> {}(key.x);
+
+                h ^= std::hash<int> {}(key.y) + 0x9e3779b9 + (h << 6) + (h >> 2);
+
+                h ^= std::hash<int> {}(key.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+
+                return h;
+            }
         };
 
         XRayScanner();
@@ -57,50 +93,81 @@ namespace Nexus {
         // Main scanner
         //
         void resetScan(BlockPos const& center, int range);
+
         void scanBlocks(SDK::BlockSource* region);
+
+        static int centeredOffset(int index);
 
         //
         // Ore ESP
         //
-        void validateCachedOres(SDK::BlockSource* region);
-        void pruneCachedOres(BlockPos const& center, int range);
-
         std::optional<OreType> classifyOre(SDK::Block* block) const;
+
         bool isOreEnabled(OreType type) const;
 
         bool containsOre(BlockPos const& pos) const;
+
         void addOre(BlockPos const& pos, OreType type);
 
+        void validateCachedOres(SDK::BlockSource* region);
+
+        void pruneCachedOres(BlockPos const& center, int range);
+
         //
-        // Cave / Path ESP
+        // Cave ESP block classification
         //
         bool isAirBlock(SDK::Block* block) const;
 
-        bool isCaveCandidate(SDK::BlockSource* region, BlockPos const& pos) const;
+        //
+        // True when a voxel should behave as open cave volume rather
+        // than a full 1x1x1 wall.
+        //
+        // Includes literal air plus thin/non-volume blocks such as
+        // torches, rails, ladders, signs, buttons, etc.
+        //
+        bool isCaveSpaceBlock(SDK::Block* block) const;
 
         bool passesAirCheck(SDK::BlockSource* region, BlockPos const& pos) const;
 
         bool hasRoofAbove(SDK::BlockSource* region, BlockPos const& pos) const;
 
-        bool containsCave(BlockPos const& pos) const;
-        void addCave(BlockPos const& pos);
+        bool isCaveAirCandidate(SDK::BlockSource* region, BlockPos const& pos) const;
+
+        std::uint8_t getExposedCaveFaces(SDK::BlockSource* region, BlockPos const& pos) const;
+
+        //
+        // Cave cache
+        //
+        void addOrUpdateCave(BlockPos const& pos, std::uint8_t faces);
+
+        void eraseCaveAt(std::size_t index);
 
         void validateCachedCaves(SDK::BlockSource* region);
+
         void pruneCachedCaves(BlockPos const& center, int range);
 
         //
-        // Scan ordering
+        // Cave visibility / occlusion
         //
-        static int centeredOffset(int index);
+        static Vec3 getCaveFaceCenter(BlockPos const& pos, std::uint8_t face);
+
+        bool isLineOccluded(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const;
+
+        void updateCaveOcclusion(SDK::BlockSource* region, Vec3 const& viewOrigin);
+
+        static BlockKey makeBlockKey(BlockPos const& pos);
 
         //
-        // Cached results
+        // Cached world data
         //
         std::vector<OreHit> ores {};
+
         std::vector<CaveHit> caves {};
 
+        std::unordered_map<BlockKey, std::size_t, BlockKeyHash> caveIndex {};
+
         //
-        // Scan state
+        // Scanner state
         //
         BlockPos scanCenter {};
 
@@ -112,16 +179,25 @@ namespace Nexus {
 
         std::size_t oreValidationIndex = 0;
         std::size_t caveValidationIndex = 0;
+        std::size_t caveOcclusionIndex = 0;
 
         bool scanInitialized = false;
 
         //
+        // Cave filter setting state
+        //
+        bool lastAirCheck3x3x3 = true;
+        bool lastIgnoreSurface = true;
+
+        //
         // Performance
         //
-        static constexpr int BlocksPerTick = 4096;
+        static constexpr int BlocksPerTickOreOnly = 4096;
+        static constexpr int BlocksPerTickWithCaves = 2048;
 
         static constexpr int OreValidationPerTick = 32;
-        static constexpr int CaveValidationPerTick = 96;
+        static constexpr int CaveValidationPerTick = 64;
+        static constexpr int CaveOcclusionCellsPerTick = 256;
 
         static constexpr int RecenterDistance = 8;
 

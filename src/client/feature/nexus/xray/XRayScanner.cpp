@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <string>
 
 namespace Nexus {
@@ -24,13 +26,35 @@ namespace Nexus {
 
         //
         // ============================================================
-        // ORE RENDERING
+        // CAVE FACE MASK
+        // ============================================================
+        //
+
+        constexpr std::uint8_t CaveFaceDown = 1u << 0;
+
+        constexpr std::uint8_t CaveFaceUp = 1u << 1;
+
+        constexpr std::uint8_t CaveFaceNorth = 1u << 2;
+
+        constexpr std::uint8_t CaveFaceSouth = 1u << 3;
+
+        constexpr std::uint8_t CaveFaceWest = 1u << 4;
+
+        constexpr std::uint8_t CaveFaceEast = 1u << 5;
+
+        constexpr float CaveFaceInset = 0.01f;
+
+        //
+        // ============================================================
+        // ORE BLOCK OUTLINE
         // ============================================================
         //
 
         void drawOutlineBlock(MCDrawUtil3D& dc, BlockPos const& pos, d2d::Color const& color) {
             float x = static_cast<float>(pos.x);
+
             float y = static_cast<float>(pos.y);
+
             float z = static_cast<float>(pos.z);
 
             float x2 = x + 1.0f;
@@ -41,39 +65,56 @@ namespace Nexus {
             // Bottom
             //
             dc.drawLine({ x, y, z }, { x2, y, z }, color);
+
             dc.drawLine({ x2, y, z }, { x2, y, z2 }, color);
+
             dc.drawLine({ x2, y, z2 }, { x, y, z2 }, color);
+
             dc.drawLine({ x, y, z2 }, { x, y, z }, color);
 
             //
             // Top
             //
             dc.drawLine({ x, y2, z }, { x2, y2, z }, color);
+
             dc.drawLine({ x2, y2, z }, { x2, y2, z2 }, color);
+
             dc.drawLine({ x2, y2, z2 }, { x, y2, z2 }, color);
+
             dc.drawLine({ x, y2, z2 }, { x, y2, z }, color);
 
             //
-            // Vertical edges
+            // Vertical
             //
             dc.drawLine({ x, y, z }, { x, y2, z }, color);
+
             dc.drawLine({ x2, y, z }, { x2, y2, z }, color);
+
             dc.drawLine({ x2, y, z2 }, { x2, y2, z2 }, color);
+
             dc.drawLine({ x, y, z2 }, { x, y2, z2 }, color);
         }
 
+        //
+        // ============================================================
+        // ORE BLOCK FILL
+        // ============================================================
+        //
+
         void drawFilledBlock(MCDrawUtil3D& dc, BlockPos const& pos, d2d::Color const& color) {
             float x = static_cast<float>(pos.x);
+
             float y = static_cast<float>(pos.y);
+
             float z = static_cast<float>(pos.z);
 
             //
-            // Bottom
+            // Down
             //
             dc.fillQuad({ x, y, z }, { x + 1.f, y, z }, { x + 1.f, y, z + 1.f }, { x, y, z + 1.f }, color);
 
             //
-            // Top
+            // Up
             //
             dc.fillQuad({ x, y + 1.f, z }, { x + 1.f, y + 1.f, z }, { x + 1.f, y + 1.f, z + 1.f },
                         { x, y + 1.f, z + 1.f }, color);
@@ -103,51 +144,169 @@ namespace Nexus {
 
         //
         // ============================================================
-        // CAVE / PATH RENDERING
+        // CAVE FACE FILL
         // ============================================================
         //
-        // CaveHit::pos represents the AIR block occupied by the
-        // player's feet.
-        //
-        // Therefore pos.y is also the top surface of the solid block
-        // directly beneath that air block.
-        //
 
-        void drawCaveTileOutline(MCDrawUtil3D& dc, BlockPos const& pos, d2d::Color const& color) {
+        void drawCaveFaceFill(MCDrawUtil3D& dc, BlockPos const& pos, std::uint8_t face, d2d::Color const& color) {
             float x = static_cast<float>(pos.x);
 
-            //
-            // Slight offset above the floor to help prevent z-fighting.
-            //
-            float y = static_cast<float>(pos.y) + 0.025f;
+            float y = static_cast<float>(pos.y);
 
             float z = static_cast<float>(pos.z);
 
             float x2 = x + 1.0f;
+            float y2 = y + 1.0f;
             float z2 = z + 1.0f;
 
-            dc.drawLine({ x, y, z }, { x2, y, z }, color);
+            if (face == CaveFaceDown) {
+                float fy = y + CaveFaceInset;
 
-            dc.drawLine({ x2, y, z }, { x2, y, z2 }, color);
+                dc.fillQuad({ x, fy, z }, { x2, fy, z }, { x2, fy, z2 }, { x, fy, z2 }, color);
 
-            dc.drawLine({ x2, y, z2 }, { x, y, z2 }, color);
+                return;
+            }
 
-            dc.drawLine({ x, y, z2 }, { x, y, z }, color);
+            if (face == CaveFaceUp) {
+                float fy = y2 - CaveFaceInset;
+
+                dc.fillQuad({ x, fy, z }, { x2, fy, z }, { x2, fy, z2 }, { x, fy, z2 }, color);
+
+                return;
+            }
+
+            if (face == CaveFaceNorth) {
+                float fz = z + CaveFaceInset;
+
+                dc.fillQuad({ x, y, fz }, { x, y2, fz }, { x2, y2, fz }, { x2, y, fz }, color);
+
+                return;
+            }
+
+            if (face == CaveFaceSouth) {
+                float fz = z2 - CaveFaceInset;
+
+                dc.fillQuad({ x, y, fz }, { x, y2, fz }, { x2, y2, fz }, { x2, y, fz }, color);
+
+                return;
+            }
+
+            if (face == CaveFaceWest) {
+                float fx = x + CaveFaceInset;
+
+                dc.fillQuad({ fx, y, z }, { fx, y2, z }, { fx, y2, z2 }, { fx, y, z2 }, color);
+
+                return;
+            }
+
+            if (face == CaveFaceEast) {
+                float fx = x2 - CaveFaceInset;
+
+                dc.fillQuad({ fx, y, z }, { fx, y2, z }, { fx, y2, z2 }, { fx, y, z2 }, color);
+            }
         }
 
-        void drawCaveTileFill(MCDrawUtil3D& dc, BlockPos const& pos, d2d::Color const& color) {
+        //
+        // ============================================================
+        // CAVE FACE OUTLINE
+        // ============================================================
+        //
+
+        void drawCaveFaceOutline(MCDrawUtil3D& dc, BlockPos const& pos, std::uint8_t face, d2d::Color const& color) {
             float x = static_cast<float>(pos.x);
-            float y = static_cast<float>(pos.y) + 0.02f;
+
+            float y = static_cast<float>(pos.y);
+
             float z = static_cast<float>(pos.z);
 
-            dc.fillQuad({ x, y, z }, { x + 1.f, y, z }, { x + 1.f, y, z + 1.f }, { x, y, z + 1.f }, color);
+            float x2 = x + 1.0f;
+            float y2 = y + 1.0f;
+            float z2 = z + 1.0f;
+
+            if (face == CaveFaceDown || face == CaveFaceUp) {
+                float fy = face == CaveFaceDown ? y + CaveFaceInset : y2 - CaveFaceInset;
+
+                dc.drawLine({ x, fy, z }, { x2, fy, z }, color);
+
+                dc.drawLine({ x2, fy, z }, { x2, fy, z2 }, color);
+
+                dc.drawLine({ x2, fy, z2 }, { x, fy, z2 }, color);
+
+                dc.drawLine({ x, fy, z2 }, { x, fy, z }, color);
+
+                return;
+            }
+
+            if (face == CaveFaceNorth || face == CaveFaceSouth) {
+                float fz = face == CaveFaceNorth ? z + CaveFaceInset : z2 - CaveFaceInset;
+
+                dc.drawLine({ x, y, fz }, { x2, y, fz }, color);
+
+                dc.drawLine({ x2, y, fz }, { x2, y2, fz }, color);
+
+                dc.drawLine({ x2, y2, fz }, { x, y2, fz }, color);
+
+                dc.drawLine({ x, y2, fz }, { x, y, fz }, color);
+
+                return;
+            }
+
+            if (face == CaveFaceWest || face == CaveFaceEast) {
+                float fx = face == CaveFaceWest ? x + CaveFaceInset : x2 - CaveFaceInset;
+
+                dc.drawLine({ fx, y, z }, { fx, y, z2 }, color);
+
+                dc.drawLine({ fx, y, z2 }, { fx, y2, z2 }, color);
+
+                dc.drawLine({ fx, y2, z2 }, { fx, y2, z }, color);
+
+                dc.drawLine({ fx, y2, z }, { fx, y, z }, color);
+            }
+        }
+
+        //
+        // ============================================================
+        // CAVE SHELL FILL
+        // ============================================================
+        //
+
+        void drawCaveShellFill(MCDrawUtil3D& dc, BlockPos const& pos, std::uint8_t faces, d2d::Color const& color) {
+            constexpr std::uint8_t faceList[] = { CaveFaceDown,  CaveFaceUp,   CaveFaceNorth,
+                                                  CaveFaceSouth, CaveFaceWest, CaveFaceEast };
+
+            for (std::uint8_t face : faceList) {
+                if ((faces & face) == 0) {
+                    continue;
+                }
+
+                drawCaveFaceFill(dc, pos, face, color);
+            }
+        }
+
+        //
+        // ============================================================
+        // CAVE SHELL OUTLINE
+        // ============================================================
+        //
+
+        void drawCaveShellOutline(MCDrawUtil3D& dc, BlockPos const& pos, std::uint8_t faces, d2d::Color const& color) {
+            constexpr std::uint8_t faceList[] = { CaveFaceDown,  CaveFaceUp,   CaveFaceNorth,
+                                                  CaveFaceSouth, CaveFaceWest, CaveFaceEast };
+
+            for (std::uint8_t face : faceList) {
+                if ((faces & face) == 0) {
+                    continue;
+                }
+
+                drawCaveFaceOutline(dc, pos, face, color);
+            }
         }
 
     } // namespace
 
     //
     // ================================================================
-    // INSTANCE / INITIALIZATION
+    // INITIALIZATION
     // ================================================================
     //
 
@@ -169,6 +328,16 @@ namespace Nexus {
 
     //
     // ================================================================
+    // BLOCK KEY
+    // ================================================================
+    //
+
+    XRayScanner::BlockKey XRayScanner::makeBlockKey(BlockPos const& pos) {
+        return { pos.x, pos.y, pos.z };
+    }
+
+    //
+    // ================================================================
     // SCAN ORDER
     // ================================================================
     //
@@ -180,11 +349,6 @@ namespace Nexus {
 
         int distance = (index + 1) / 2;
 
-        //
-        // Produces:
-        //
-        // 0, -1, +1, -2, +2, -3, +3 ...
-        //
         return (index & 1) ? -distance : distance;
     }
 
@@ -223,78 +387,45 @@ namespace Nexus {
 
         std::string id = block->legacyBlock->namespacedId.getString();
 
-        //
-        // Diamond
-        //
         if (id == "minecraft:diamond_ore" || id == "minecraft:deepslate_diamond_ore") {
             return OreType::Diamond;
         }
 
-        //
-        // Emerald
-        //
         if (id == "minecraft:emerald_ore" || id == "minecraft:deepslate_emerald_ore") {
             return OreType::Emerald;
         }
 
-        //
-        // Gold
-        //
         if (id == "minecraft:gold_ore" || id == "minecraft:deepslate_gold_ore" || id == "minecraft:nether_gold_ore") {
             return OreType::Gold;
         }
 
-        //
-        // Iron
-        //
         if (id == "minecraft:iron_ore" || id == "minecraft:deepslate_iron_ore") {
             return OreType::Iron;
         }
 
-        //
-        // Redstone
-        //
         if (id == "minecraft:redstone_ore" || id == "minecraft:deepslate_redstone_ore" ||
             id == "minecraft:lit_redstone_ore") {
             return OreType::Redstone;
         }
 
-        //
-        // Lapis
-        //
         if (id == "minecraft:lapis_ore" || id == "minecraft:deepslate_lapis_ore") {
             return OreType::Lapis;
         }
 
-        //
-        // Coal
-        //
         if (id == "minecraft:coal_ore" || id == "minecraft:deepslate_coal_ore") {
             return OreType::Coal;
         }
 
-        //
-        // Copper
-        //
         if (id == "minecraft:copper_ore" || id == "minecraft:deepslate_copper_ore") {
             return OreType::Copper;
         }
 
-        //
-        // Ancient Debris
-        //
         if (id == "minecraft:ancient_debris") {
             return OreType::AncientDebris;
         }
 
         return std::nullopt;
     }
-
-    //
-    // ================================================================
-    // ORE SETTINGS
-    // ================================================================
-    //
 
     bool XRayScanner::isOreEnabled(OreType type) const {
         switch (type) {
@@ -346,10 +477,6 @@ namespace Nexus {
     }
 
     void XRayScanner::addOre(BlockPos const& pos, OreType type) {
-        //
-        // If this position already exists,
-        // simply update its type.
-        //
         for (auto& ore : ores) {
             if (ore.pos.x == pos.x && ore.pos.y == pos.y && ore.pos.z == pos.z) {
                 ore.type = type;
@@ -411,8 +538,9 @@ namespace Nexus {
                 if (oreValidationIndex >= ores.size()) {
                     oreValidationIndex = 0;
                 }
+            }
 
-            } else {
+            else {
                 ores[oreValidationIndex].type = *type;
 
                 ++oreValidationIndex;
@@ -424,7 +552,7 @@ namespace Nexus {
 
     //
     // ================================================================
-    // AIR DETECTION
+    // LITERAL AIR
     // ================================================================
     //
 
@@ -440,7 +568,196 @@ namespace Nexus {
 
     //
     // ================================================================
-    // 3x3x3 AIR CHECK
+    // CAVE-SPACE CLASSIFICATION
+    // ================================================================
+    //
+    // Cave ESP needs to distinguish between:
+    //
+    // 1. A voxel occupied by real terrain.
+    //
+    // 2. A voxel that contains only a small/thin block and therefore
+    //    should still behave as open cave volume.
+    //
+    // A torch, rail, button, sign, vine, etc. should NOT create a
+    // fake one-block-wide wall in Cave ESP.
+    //
+
+    bool XRayScanner::isCaveSpaceBlock(SDK::Block* block) const {
+        if (!block || !block->legacyBlock) {
+            return false;
+        }
+
+        //
+        // Literal air is always cave space.
+        //
+        if (isAirBlock(block)) {
+            return true;
+        }
+
+        std::string id = block->legacyBlock->namespacedId.getString();
+
+        //
+        // ------------------------------------------------------------
+        // TORCHES / LIGHT SOURCES
+        // ------------------------------------------------------------
+        //
+
+        if (id.find("torch") != std::string::npos) {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // RAILS
+        // ------------------------------------------------------------
+        //
+
+        if (id == "minecraft:rail" || id.ends_with("_rail")) {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // BASIC REDSTONE
+        // ------------------------------------------------------------
+        //
+
+        if (id == "minecraft:redstone_wire" || id == "minecraft:lever" || id == "minecraft:tripwire" ||
+            id == "minecraft:tripwire_hook" ||
+
+            id.ends_with("_button") || id.ends_with("_pressure_plate") ||
+
+            id.find("repeater") != std::string::npos ||
+
+            id.find("comparator") != std::string::npos) {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // CLIMBABLE / THIN STRUCTURES
+        // ------------------------------------------------------------
+        //
+
+        if (id == "minecraft:ladder" || id == "minecraft:chain" || id == "minecraft:scaffolding" ||
+
+            id.find("vine") != std::string::npos) {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // SIGNS / BANNERS
+        // ------------------------------------------------------------
+        //
+
+        if (id.find("sign") != std::string::npos ||
+
+            id.find("banner") != std::string::npos) {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // FLOOR / WALL OVERLAYS
+        // ------------------------------------------------------------
+        //
+
+        if (id == "minecraft:carpet" || id.ends_with("_carpet") ||
+
+            id == "minecraft:snow_layer" || id == "minecraft:glow_lichen" || id == "minecraft:sculk_vein" ||
+
+            id == "minecraft:pink_petals" || id == "minecraft:leaf_litter") {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // FIRE / PORTAL-LIKE THIN CONTENT
+        // ------------------------------------------------------------
+        //
+
+        if (id == "minecraft:fire" || id == "minecraft:soul_fire" || id == "minecraft:portal") {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // DECORATIVE THIN BLOCKS
+        // ------------------------------------------------------------
+        //
+
+        if (id == "minecraft:cobweb" || id == "minecraft:flower_pot" || id == "minecraft:end_rod" ||
+            id == "minecraft:lightning_rod" ||
+
+            id.find("candle") != std::string::npos ||
+
+            id.find("coral_fan") != std::string::npos) {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // SMALL PLANTS
+        // ------------------------------------------------------------
+        //
+        // These are intentionally explicit instead of doing something
+        // dangerous like:
+        //
+        //     id.find("grass")
+        //
+        // because that would accidentally classify grass_block as open
+        // cave space.
+        //
+
+        if (id == "minecraft:short_grass" || id == "minecraft:tallgrass" || id == "minecraft:fern" ||
+            id == "minecraft:large_fern" || id == "minecraft:deadbush" ||
+
+            id == "minecraft:dandelion" || id == "minecraft:poppy" || id == "minecraft:blue_orchid" ||
+            id == "minecraft:allium" || id == "minecraft:azure_bluet" || id == "minecraft:red_tulip" ||
+            id == "minecraft:orange_tulip" || id == "minecraft:white_tulip" || id == "minecraft:pink_tulip" ||
+            id == "minecraft:oxeye_daisy" || id == "minecraft:cornflower" || id == "minecraft:lily_of_the_valley" ||
+            id == "minecraft:wither_rose" ||
+
+            id == "minecraft:sunflower" || id == "minecraft:lilac" || id == "minecraft:rose_bush" ||
+            id == "minecraft:peony" ||
+
+            id == "minecraft:brown_mushroom" || id == "minecraft:red_mushroom" ||
+
+            id == "minecraft:crimson_fungus" || id == "minecraft:warped_fungus" || id == "minecraft:crimson_roots" ||
+            id == "minecraft:warped_roots" || id == "minecraft:nether_sprouts" || id == "minecraft:hanging_roots" ||
+
+            id == "minecraft:spore_blossom") {
+            return true;
+        }
+
+        //
+        // ------------------------------------------------------------
+        // CAVE-SPECIFIC SMALL FEATURES
+        // ------------------------------------------------------------
+        //
+
+        if (id == "minecraft:pointed_dripstone" ||
+
+            id == "minecraft:small_amethyst_bud" || id == "minecraft:medium_amethyst_bud" ||
+            id == "minecraft:large_amethyst_bud" || id == "minecraft:amethyst_cluster") {
+            return true;
+        }
+
+        //
+        // Everything else is treated as structural terrain for now.
+        //
+        // Slabs, stairs, fences, walls, doors, trapdoors, glass,
+        // fluids, leaves, etc. are intentionally NOT thrown into this
+        // category yet because they need partial-volume handling rather
+        // than simply pretending they are air.
+        //
+        return false;
+    }
+
+    //
+    // ================================================================
+    // 3x3x3 OPEN-SPACE CHECK
     // ================================================================
     //
 
@@ -449,14 +766,11 @@ namespace Nexus {
             return false;
         }
 
-        //
-        // User disabled the 3x3x3 filtering.
-        //
         if (!xRaySettings.airCheck3x3x3) {
             return true;
         }
 
-        int airCount = 0;
+        int openCount = 0;
 
         for (int x = -1; x <= 1; ++x) {
             for (int y = -1; y <= 1; ++y) {
@@ -465,14 +779,10 @@ namespace Nexus {
 
                     SDK::Block* block = region->getBlock(checkPos);
 
-                    if (isAirBlock(block)) {
-                        ++airCount;
+                    if (isCaveSpaceBlock(block)) {
+                        ++openCount;
 
-                        //
-                        // We already know this is open enough.
-                        // Stop doing unnecessary BlockSource lookups.
-                        //
-                        if (airCount >= MinimumAirNeighbors) {
+                        if (openCount >= MinimumAirNeighbors) {
                             return true;
                         }
                     }
@@ -485,7 +795,7 @@ namespace Nexus {
 
     //
     // ================================================================
-    // SURFACE REJECTION
+    // SURFACE FILTER
     // ================================================================
     //
 
@@ -494,37 +804,30 @@ namespace Nexus {
             return false;
         }
 
-        //
-        // Surface filtering is disabled.
-        //
         if (!xRaySettings.ignoreSurface) {
             return true;
         }
 
-        //
-        // Start two blocks above because:
-        //
-        // pos       = feet air
-        // pos + 1   = head air
-        //
-        // We want to know whether there is actual terrain above
-        // the walkable space.
-        //
-        for (int offset = 2; offset <= RoofCheckDistance; ++offset) {
+        for (int offset = 1; offset <= RoofCheckDistance; ++offset) {
             BlockPos checkPos { pos.x, pos.y + offset, pos.z };
 
             SDK::Block* block = region->getBlock(checkPos);
 
-            if (!isAirBlock(block)) {
+            //
+            // Unknown/unloaded data is not a roof.
+            //
+            if (!block) {
+                continue;
+            }
+
+            //
+            // Torches, signs, rails, etc. also aren't roofs.
+            //
+            if (!isCaveSpaceBlock(block)) {
                 return true;
             }
         }
 
-        //
-        // No roof found nearby.
-        //
-        // Most likely open surface terrain.
-        //
         return false;
     }
 
@@ -534,55 +837,26 @@ namespace Nexus {
     // ================================================================
     //
 
-    bool XRayScanner::isCaveCandidate(SDK::BlockSource* region, BlockPos const& pos) const {
+    bool XRayScanner::isCaveAirCandidate(SDK::BlockSource* region, BlockPos const& pos) const {
         if (!region) {
             return false;
         }
 
-        //
-        // Feet position must be air.
-        //
-        SDK::Block* current = region->getBlock(pos);
+        SDK::Block* block = region->getBlock(pos);
 
-        if (!isAirBlock(current)) {
+        //
+        // Not restricted to literal air anymore.
+        //
+        // Thin blocks are considered part of the cave volume.
+        //
+        if (!isCaveSpaceBlock(block)) {
             return false;
         }
 
-        //
-        // Need at least two blocks of vertical room.
-        //
-        BlockPos abovePos { pos.x, pos.y + 1, pos.z };
-
-        SDK::Block* above = region->getBlock(abovePos);
-
-        if (!isAirBlock(above)) {
-            return false;
-        }
-
-        //
-        // There must be something below the air.
-        //
-        // That gives us a walkable cave floor rather than filling
-        // the entire cave volume with boxes.
-        //
-        BlockPos belowPos { pos.x, pos.y - 1, pos.z };
-
-        SDK::Block* below = region->getBlock(belowPos);
-
-        if (!below || isAirBlock(below)) {
-            return false;
-        }
-
-        //
-        // Optional 3x3x3 open-space validation.
-        //
         if (!passesAirCheck(region, pos)) {
             return false;
         }
 
-        //
-        // Optional surface rejection.
-        //
         if (!hasRoofAbove(region, pos)) {
             return false;
         }
@@ -592,26 +866,129 @@ namespace Nexus {
 
     //
     // ================================================================
+    // STRUCTURAL CAVE FACES
+    // ================================================================
+    //
+
+    std::uint8_t XRayScanner::getExposedCaveFaces(SDK::BlockSource* region, BlockPos const& pos) const {
+        if (!region) {
+            return 0;
+        }
+
+        std::uint8_t faces = 0;
+
+        auto isStructural = [&](BlockPos const& checkPos) -> bool {
+            SDK::Block* block = region->getBlock(checkPos);
+
+            //
+            // Unknown/unloaded data should not generate
+            // fake geometry.
+            //
+            if (!block) {
+                return false;
+            }
+
+            //
+            // Thin blocks behave as open cave space.
+            //
+            return !isCaveSpaceBlock(block);
+        };
+
+        if (isStructural({ pos.x, pos.y - 1, pos.z })) {
+            faces |= CaveFaceDown;
+        }
+
+        if (isStructural({ pos.x, pos.y + 1, pos.z })) {
+            faces |= CaveFaceUp;
+        }
+
+        if (isStructural({ pos.x, pos.y, pos.z - 1 })) {
+            faces |= CaveFaceNorth;
+        }
+
+        if (isStructural({ pos.x, pos.y, pos.z + 1 })) {
+            faces |= CaveFaceSouth;
+        }
+
+        if (isStructural({ pos.x - 1, pos.y, pos.z })) {
+            faces |= CaveFaceWest;
+        }
+
+        if (isStructural({ pos.x + 1, pos.y, pos.z })) {
+            faces |= CaveFaceEast;
+        }
+
+        return faces;
+    }
+
+    //
+    // ================================================================
     // CAVE CACHE
     // ================================================================
     //
 
-    bool XRayScanner::containsCave(BlockPos const& pos) const {
-        for (auto const& cave : caves) {
-            if (cave.pos.x == pos.x && cave.pos.y == pos.y && cave.pos.z == pos.z) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    void XRayScanner::addCave(BlockPos const& pos) {
-        if (containsCave(pos)) {
+    void XRayScanner::addOrUpdateCave(BlockPos const& pos, std::uint8_t faces) {
+        if (faces == 0) {
             return;
         }
 
-        caves.push_back({ pos });
+        BlockKey key = makeBlockKey(pos);
+
+        auto existing = caveIndex.find(key);
+
+        if (existing != caveIndex.end()) {
+            CaveHit& cave = caves[existing->second];
+
+            cave.faces = faces;
+
+            cave.occludedFaces &= faces;
+
+            return;
+        }
+
+        std::size_t index = caves.size();
+
+        //
+        // New cave geometry stays invisible until the
+        // occlusion system has actually tested it.
+        //
+        caves.push_back({ pos, faces, 0 });
+
+        caveIndex.emplace(key, index);
+    }
+
+    void XRayScanner::eraseCaveAt(std::size_t index) {
+        if (index >= caves.size()) {
+            return;
+        }
+
+        BlockKey removedKey = makeBlockKey(caves[index].pos);
+
+        std::size_t lastIndex = caves.size() - 1;
+
+        if (index != lastIndex) {
+            caves[index] = caves[lastIndex];
+
+            BlockKey movedKey = makeBlockKey(caves[index].pos);
+
+            auto moved = caveIndex.find(movedKey);
+
+            if (moved != caveIndex.end()) {
+                moved->second = index;
+            }
+        }
+
+        caves.pop_back();
+
+        caveIndex.erase(removedKey);
+
+        if (caveValidationIndex >= caves.size()) {
+            caveValidationIndex = 0;
+        }
+
+        if (caveOcclusionIndex >= caves.size()) {
+            caveOcclusionIndex = 0;
+        }
     }
 
     void XRayScanner::pruneCachedCaves(BlockPos const& center, int range) {
@@ -619,28 +996,41 @@ namespace Nexus {
 
         long long keepRangeSq = static_cast<long long>(keepRange) * static_cast<long long>(keepRange);
 
-        std::erase_if(caves,
+        std::size_t index = 0;
 
-                      [&](CaveHit const& cave) {
-                          long long dx = static_cast<long long>(cave.pos.x) - center.x;
+        while (index < caves.size()) {
+            CaveHit const& cave = caves[index];
 
-                          long long dy = static_cast<long long>(cave.pos.y) - center.y;
+            long long dx = static_cast<long long>(cave.pos.x) - center.x;
 
-                          long long dz = static_cast<long long>(cave.pos.z) - center.z;
+            long long dy = static_cast<long long>(cave.pos.y) - center.y;
 
-                          long long distanceSq = dx * dx + dy * dy + dz * dz;
+            long long dz = static_cast<long long>(cave.pos.z) - center.z;
 
-                          return distanceSq > keepRangeSq;
-                      });
+            long long distanceSq = dx * dx + dy * dy + dz * dz;
+
+            if (distanceSq > keepRangeSq) {
+                eraseCaveAt(index);
+
+                continue;
+            }
+
+            ++index;
+        }
 
         if (caveValidationIndex >= caves.size()) {
             caveValidationIndex = 0;
+        }
+
+        if (caveOcclusionIndex >= caves.size()) {
+            caveOcclusionIndex = 0;
         }
     }
 
     void XRayScanner::validateCachedCaves(SDK::BlockSource* region) {
         if (!region || caves.empty()) {
             caveValidationIndex = 0;
+            caveOcclusionIndex = 0;
 
             return;
         }
@@ -654,17 +1044,269 @@ namespace Nexus {
 
             BlockPos const pos = caves[caveValidationIndex].pos;
 
-            if (!isCaveCandidate(region, pos)) {
-                caves.erase(caves.begin() + static_cast<std::ptrdiff_t>(caveValidationIndex));
+            if (!isCaveAirCandidate(region, pos)) {
+                eraseCaveAt(caveValidationIndex);
 
-                if (caveValidationIndex >= caves.size()) {
-                    caveValidationIndex = 0;
-                }
+                ++checked;
 
-            } else {
-                ++caveValidationIndex;
+                continue;
             }
 
+            std::uint8_t faces = getExposedCaveFaces(region, pos);
+
+            //
+            // Entirely surrounded by cave space.
+            // Interior voxel does not belong in shell cache.
+            //
+            if (faces == 0) {
+                eraseCaveAt(caveValidationIndex);
+
+                ++checked;
+
+                continue;
+            }
+
+            caves[caveValidationIndex].faces = faces;
+
+            caves[caveValidationIndex].occludedFaces &= faces;
+
+            ++caveValidationIndex;
+            ++checked;
+        }
+    }
+
+    //
+    // ================================================================
+    // CAVE FACE TARGET
+    // ================================================================
+    //
+
+    Vec3 XRayScanner::getCaveFaceCenter(BlockPos const& pos, std::uint8_t face) {
+        constexpr float inset = 0.06f;
+
+        Vec3 center { static_cast<float>(pos.x) + 0.5f, static_cast<float>(pos.y) + 0.5f,
+                      static_cast<float>(pos.z) + 0.5f };
+
+        if (face == CaveFaceDown) {
+            center.y = static_cast<float>(pos.y) + inset;
+        }
+
+        else if (face == CaveFaceUp) {
+            center.y = static_cast<float>(pos.y) + 1.0f - inset;
+        }
+
+        else if (face == CaveFaceNorth) {
+            center.z = static_cast<float>(pos.z) + inset;
+        }
+
+        else if (face == CaveFaceSouth) {
+            center.z = static_cast<float>(pos.z) + 1.0f - inset;
+        }
+
+        else if (face == CaveFaceWest) {
+            center.x = static_cast<float>(pos.x) + inset;
+        }
+
+        else if (face == CaveFaceEast) {
+            center.x = static_cast<float>(pos.x) + 1.0f - inset;
+        }
+
+        return center;
+    }
+
+    //
+    // ================================================================
+    // VOXEL OCCLUSION RAY
+    // ================================================================
+    //
+
+    bool XRayScanner::isLineOccluded(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const {
+        if (!region) {
+            return false;
+        }
+
+        float dx = end.x - start.x;
+
+        float dy = end.y - start.y;
+
+        float dz = end.z - start.z;
+
+        float lengthSq = dx * dx + dy * dy + dz * dz;
+
+        if (lengthSq <= 0.000001f) {
+            return false;
+        }
+
+        int x = static_cast<int>(std::floor(start.x));
+
+        int y = static_cast<int>(std::floor(start.y));
+
+        int z = static_cast<int>(std::floor(start.z));
+
+        int endX = static_cast<int>(std::floor(end.x));
+
+        int endY = static_cast<int>(std::floor(end.y));
+
+        int endZ = static_cast<int>(std::floor(end.z));
+
+        int stepX = dx > 0.0f ? 1 : (dx < 0.0f ? -1 : 0);
+
+        int stepY = dy > 0.0f ? 1 : (dy < 0.0f ? -1 : 0);
+
+        int stepZ = dz > 0.0f ? 1 : (dz < 0.0f ? -1 : 0);
+
+        constexpr float infinity = std::numeric_limits<float>::infinity();
+
+        float tDeltaX = stepX == 0 ? infinity : std::abs(1.0f / dx);
+
+        float tDeltaY = stepY == 0 ? infinity : std::abs(1.0f / dy);
+
+        float tDeltaZ = stepZ == 0 ? infinity : std::abs(1.0f / dz);
+
+        auto calculateInitialT = [](float coordinate, float delta, int step) -> float {
+            if (step > 0) {
+                float nextBoundary = std::floor(coordinate) + 1.0f;
+
+                return (nextBoundary - coordinate) / delta;
+            }
+
+            if (step < 0) {
+                float previousBoundary = std::floor(coordinate);
+
+                return (coordinate - previousBoundary) / (-delta);
+            }
+
+            return std::numeric_limits<float>::infinity();
+        };
+
+        float tMaxX = calculateInitialT(start.x, dx, stepX);
+
+        float tMaxY = calculateInitialT(start.y, dy, stepY);
+
+        float tMaxZ = calculateInitialT(start.z, dz, stepZ);
+
+        int safety = 0;
+
+        while ((x != endX || y != endY || z != endZ) && safety < 512) {
+            ++safety;
+
+            float nextT = std::min(tMaxX, std::min(tMaxY, tMaxZ));
+
+            if (!std::isfinite(nextT) || nextT > 1.0f) {
+                break;
+            }
+
+            constexpr float epsilon = 0.00001f;
+
+            if (tMaxX <= nextT + epsilon) {
+                x += stepX;
+
+                tMaxX += tDeltaX;
+            }
+
+            if (tMaxY <= nextT + epsilon) {
+                y += stepY;
+
+                tMaxY += tDeltaY;
+            }
+
+            if (tMaxZ <= nextT + epsilon) {
+                z += stepZ;
+
+                tMaxZ += tDeltaZ;
+            }
+
+            //
+            // Reached target cave-space voxel.
+            //
+            if (x == endX && y == endY && z == endZ) {
+                break;
+            }
+
+            if (y < -64 || y > 320) {
+                continue;
+            }
+
+            SDK::Block* block = region->getBlock(BlockPos { x, y, z });
+
+            //
+            // IMPORTANT:
+            //
+            // Thin blocks such as torches no longer occlude this ray.
+            //
+            if (block && !isCaveSpaceBlock(block)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //
+    // ================================================================
+    // VIEW-DEPENDENT CAVE OCCLUSION
+    // ================================================================
+    //
+
+    void XRayScanner::updateCaveOcclusion(SDK::BlockSource* region, Vec3 const& viewOrigin) {
+        if (!region || caves.empty()) {
+            caveOcclusionIndex = 0;
+
+            return;
+        }
+
+        constexpr std::uint8_t faceList[] = { CaveFaceDown,  CaveFaceUp,   CaveFaceNorth,
+                                              CaveFaceSouth, CaveFaceWest, CaveFaceEast };
+
+        int checked = 0;
+
+        while (checked < CaveOcclusionCellsPerTick && !caves.empty()) {
+            if (caveOcclusionIndex >= caves.size()) {
+                caveOcclusionIndex = 0;
+            }
+
+            CaveHit& cave = caves[caveOcclusionIndex];
+
+            Vec3 cellCenter { static_cast<float>(cave.pos.x) + 0.5f,
+
+                              static_cast<float>(cave.pos.y) + 0.5f,
+
+                              static_cast<float>(cave.pos.z) + 0.5f };
+
+            //
+            // If the cave cell is directly visible, no X-Ray
+            // geometry is needed for it.
+            //
+            if (!isLineOccluded(region, viewOrigin, cellCenter)) {
+                cave.occludedFaces = 0;
+
+                ++caveOcclusionIndex;
+                ++checked;
+
+                continue;
+            }
+
+            //
+            // Hidden cell:
+            // refine visibility face-by-face.
+            //
+            std::uint8_t occluded = 0;
+
+            for (std::uint8_t face : faceList) {
+                if ((cave.faces & face) == 0) {
+                    continue;
+                }
+
+                Vec3 target = getCaveFaceCenter(cave.pos, face);
+
+                if (isLineOccluded(region, viewOrigin, target)) {
+                    occluded |= face;
+                }
+            }
+
+            cave.occludedFaces = occluded;
+
+            ++caveOcclusionIndex;
             ++checked;
         }
     }
@@ -686,15 +1328,11 @@ namespace Nexus {
 
         long long rangeSq = static_cast<long long>(range) * static_cast<long long>(range);
 
+        int blockBudget = xRaySettings.caveESP ? BlocksPerTickWithCaves : BlocksPerTickOreOnly;
+
         int scanned = 0;
 
-        while (scanned < BlocksPerTick) {
-            //
-            // Y is the fastest-moving axis.
-            //
-            // Nearby X/Z columns are therefore fully scanned
-            // vertically before moving farther horizontally.
-            //
+        while (scanned < blockBudget) {
             int dx = centeredOffset(scanXIndex);
 
             int dy = centeredOffset(scanYIndex);
@@ -704,7 +1342,7 @@ namespace Nexus {
             BlockPos pos { scanCenter.x + dx, scanCenter.y + dy, scanCenter.z + dz };
 
             //
-            // Advance scan cursor.
+            // Advance scanner.
             //
             ++scanYIndex;
 
@@ -718,14 +1356,6 @@ namespace Nexus {
 
                     ++scanZIndex;
 
-                    //
-                    // Full pass complete.
-                    //
-                    // Begin another pass so:
-                    //
-                    // - newly exposed caves are discovered
-                    // - newly placed/destroyed ores are found
-                    //
                     if (scanZIndex >= side) {
                         scanZIndex = 0;
                     }
@@ -734,20 +1364,16 @@ namespace Nexus {
 
             ++scanned;
 
-            //
-            // Ignore cube corners outside the requested
-            // spherical radius.
-            //
-            long long distanceSq =
-                static_cast<long long>(dx) * dx + static_cast<long long>(dy) * dy + static_cast<long long>(dz) * dz;
+            long long distanceSq = static_cast<long long>(dx) * dx +
+
+                                   static_cast<long long>(dy) * dy +
+
+                                   static_cast<long long>(dz) * dz;
 
             if (distanceSq > rangeSq) {
                 continue;
             }
 
-            //
-            // Bedrock world height limits.
-            //
             if (pos.y < -64 || pos.y > 320) {
                 continue;
             }
@@ -763,6 +1389,7 @@ namespace Nexus {
             // ORE ESP
             // ========================================================
             //
+
             if (xRaySettings.oreESP) {
                 auto oreType = classifyOre(block);
 
@@ -773,18 +1400,21 @@ namespace Nexus {
 
             //
             // ========================================================
-            // CAVE / PATH ESP
+            // CAVE ESP
             // ========================================================
             //
-            if (xRaySettings.caveESP) {
-                //
-                // Cheap first filter.
-                //
-                // Do not perform all of the cave checks unless the
-                // current block is already known to be air.
-                //
-                if (isAirBlock(block) && isCaveCandidate(region, pos)) {
-                    addCave(pos);
+            // Thin blocks are now valid cave-space cells too.
+            //
+
+            if (xRaySettings.caveESP && isCaveSpaceBlock(block)) {
+                if (!isCaveAirCandidate(region, pos)) {
+                    continue;
+                }
+
+                std::uint8_t faces = getExposedCaveFaces(region, pos);
+
+                if (faces != 0) {
+                    addOrUpdateCave(pos, faces);
                 }
             }
         }
@@ -800,46 +1430,74 @@ namespace Nexus {
         auto& tick = static_cast<TickEvent&>(event);
 
         //
-        // No world loaded.
+        // Cave classification settings changed.
+        //
+        if (lastAirCheck3x3x3 != xRaySettings.airCheck3x3x3 ||
+
+            lastIgnoreSurface != xRaySettings.ignoreSurface) {
+            caves.clear();
+            caveIndex.clear();
+
+            caveValidationIndex = 0;
+            caveOcclusionIndex = 0;
+
+            scanInitialized = false;
+
+            lastAirCheck3x3x3 = xRaySettings.airCheck3x3x3;
+
+            lastIgnoreSurface = xRaySettings.ignoreSurface;
+        }
+
+        //
+        // No world.
         //
         if (!tick.getLevel()) {
             ores.clear();
+
             caves.clear();
+            caveIndex.clear();
 
             scanInitialized = false;
 
             oreValidationIndex = 0;
             caveValidationIndex = 0;
+            caveOcclusionIndex = 0;
 
             return;
         }
 
         //
-        // Master X-Ray disabled.
+        // X-Ray master disabled.
         //
         if (!xRaySettings.enabled) {
             ores.clear();
+
             caves.clear();
+            caveIndex.clear();
 
             scanInitialized = false;
 
             oreValidationIndex = 0;
             caveValidationIndex = 0;
+            caveOcclusionIndex = 0;
 
             return;
         }
 
         //
-        // Neither scanner feature needs world data.
+        // Nothing needs scanning.
         //
         if (!xRaySettings.oreESP && !xRaySettings.caveESP) {
             ores.clear();
+
             caves.clear();
+            caveIndex.clear();
 
             scanInitialized = false;
 
             oreValidationIndex = 0;
             caveValidationIndex = 0;
+            caveOcclusionIndex = 0;
 
             return;
         }
@@ -855,8 +1513,10 @@ namespace Nexus {
 
         if (!xRaySettings.caveESP) {
             caves.clear();
+            caveIndex.clear();
 
             caveValidationIndex = 0;
+            caveOcclusionIndex = 0;
         }
 
         auto clientInstance = SDK::ClientInstance::get();
@@ -874,6 +1534,17 @@ namespace Nexus {
         }
 
         Vec3 playerPos = player->getPos();
+
+        //
+        // Approximate first-person eye position.
+        //
+        Vec3 viewOrigin = playerPos;
+
+        auto const& playerBox = player->getBoundingBox();
+
+        float playerHeight = playerBox.higher.y - playerBox.lower.y;
+
+        viewOrigin.y = playerBox.lower.y + playerHeight * 0.90f;
 
         BlockPos center { static_cast<int>(std::floor(playerPos.x)),
 
@@ -900,7 +1571,7 @@ namespace Nexus {
         }
 
         //
-        // Validate only features currently enabled.
+        // Validate old cache.
         //
         if (xRaySettings.oreESP) {
             validateCachedOres(region);
@@ -911,9 +1582,16 @@ namespace Nexus {
         }
 
         //
-        // One shared scan performs both Ore ESP and Cave ESP.
+        // One shared world scan.
         //
         scanBlocks(region);
+
+        //
+        // Refresh which cave faces are hidden by actual terrain.
+        //
+        if (xRaySettings.caveESP) {
+            updateCaveOcclusion(region, viewOrigin);
+        }
     }
 
     //
@@ -949,10 +1627,6 @@ namespace Nexus {
             return;
         }
 
-        //
-        // Same rendering material currently used by the working
-        // Ore ESP and Latite BlockOutline.
-        //
         MCDrawUtil3D dc { clientInstance->levelRenderer, screenContext, SDK::MaterialPtr::getUIColor() };
 
         //
@@ -996,26 +1670,6 @@ namespace Nexus {
 
         //
         // ============================================================
-        // ORE OUTLINES
-        // ============================================================
-        //
-
-        if (renderOres && xRaySettings.outline) {
-            for (auto const& ore : ores) {
-                if (!isOreEnabled(ore.type)) {
-                    continue;
-                }
-
-                d2d::Color color = getOreColor(ore.type).asAlpha(0.95f);
-
-                drawOutlineBlock(dc, ore.pos, color);
-            }
-
-            dc.flush();
-        }
-
-        //
-        // ============================================================
         // ORE FILLS
         // ============================================================
         //
@@ -1036,36 +1690,60 @@ namespace Nexus {
 
         //
         // ============================================================
-        // CAVE / PATH ESP
+        // ORE OUTLINES
+        // ============================================================
+        //
+
+        if (renderOres && xRaySettings.outline) {
+            for (auto const& ore : ores) {
+                if (!isOreEnabled(ore.type)) {
+                    continue;
+                }
+
+                d2d::Color color = getOreColor(ore.type).asAlpha(0.95f);
+
+                drawOutlineBlock(dc, ore.pos, color);
+            }
+
+            dc.flush();
+        }
+
+        //
+        // ============================================================
+        // CAVE SHELL
         // ============================================================
         //
 
         if (renderCaves) {
-            //
-            // Purple path color.
-            //
-            d2d::Color baseCaveColor = d2d::Color::RGB(0xA9, 0x5C, 0xFF);
+            d2d::Color caveColor = d2d::Color::RGB(0xA9, 0x5C, 0xFF);
 
-            //
-            // Cave Opacity is stored as 5 - 100.
-            //
-            float caveAlpha = std::clamp(static_cast<float>(xRaySettings.caveOpacity) / 100.0f,
+            float requestedOpacity = std::clamp(static_cast<float>(xRaySettings.caveOpacity) / 100.0f,
 
-                                         0.05f, 1.0f);
+                                                0.05f, 1.0f);
+
+            float fillAlpha = std::clamp(requestedOpacity * 0.45f,
+
+                                         0.03f, 0.45f);
+
+            float outlineAlpha = std::clamp(0.35f + requestedOpacity * 0.50f,
+
+                                            0.40f, 0.85f);
 
             //
             // --------------------------------------------------------
-            // PATH OUTLINE
+            // CAVE FILL
             // --------------------------------------------------------
             //
 
-            if (xRaySettings.outline) {
-                float outlineAlpha = std::max(0.60f, caveAlpha);
-
-                d2d::Color outlineColor = baseCaveColor.asAlpha(outlineAlpha);
+            if (xRaySettings.fill) {
+                d2d::Color fillColor = caveColor.asAlpha(fillAlpha);
 
                 for (auto const& cave : caves) {
-                    drawCaveTileOutline(dc, cave.pos, outlineColor);
+                    if (cave.occludedFaces == 0) {
+                        continue;
+                    }
+
+                    drawCaveShellFill(dc, cave.pos, cave.occludedFaces, fillColor);
                 }
 
                 dc.flush();
@@ -1073,15 +1751,19 @@ namespace Nexus {
 
             //
             // --------------------------------------------------------
-            // PATH FILL
+            // CAVE OUTLINE
             // --------------------------------------------------------
             //
 
-            if (xRaySettings.fill) {
-                d2d::Color fillColor = baseCaveColor.asAlpha(caveAlpha);
+            if (xRaySettings.outline) {
+                d2d::Color outlineColor = caveColor.asAlpha(outlineAlpha);
 
                 for (auto const& cave : caves) {
-                    drawCaveTileFill(dc, cave.pos, fillColor);
+                    if (cave.occludedFaces == 0) {
+                        continue;
+                    }
+
+                    drawCaveShellOutline(dc, cave.pos, cave.occludedFaces, outlineColor);
                 }
 
                 dc.flush();
