@@ -71,6 +71,33 @@ namespace Nexus {
             OreType type;
         };
 
+        //
+        // One cached greedy-meshed Ore ESP surface.
+        //
+        struct OreMeshQuad {
+            OreType type;
+
+            std::uint8_t face = 0;
+
+            int plane = 0;
+
+            int u = 0;
+            int v = 0;
+
+            int width = 1;
+            int height = 1;
+        };
+
+        //
+        // One cached outer boundary line for a merged ore vein.
+        //
+        struct OreOutlineLine {
+            Vec3 start;
+            Vec3 end;
+
+            OreType type;
+        };
+
         struct CaveHit {
             BlockPos pos;
 
@@ -192,13 +219,13 @@ namespace Nexus {
 
         bool isOreEnabled(OreType type) const;
 
-        bool containsOre(BlockPos const& pos) const;
-
         void addOre(BlockPos const& pos, OreType type);
 
         void validateCachedOres(SDK::BlockSource* region);
 
         void pruneCachedOres(BlockPos const& center, int range);
+
+        void rebuildOreMesh();
 
         //
         // ============================================================
@@ -215,8 +242,6 @@ namespace Nexus {
         // Cached classification used by hot scan/ray paths.
         //
         CaveBlockClass classifyCaveBlockCached(SDK::Block* block) const;
-
-        bool isAirBlock(SDK::Block* block) const;
 
         bool isCaveSpaceBlock(SDK::Block* block) const;
 
@@ -260,10 +285,6 @@ namespace Nexus {
 
         CaveRayInfo getCaveRayInfo(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const;
 
-        bool isLineOccluded(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const;
-
-        std::uint8_t getLineSolidDepth(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const;
-
         void updateCaveOcclusion(SDK::BlockSource* region, Vec3 const& viewOrigin);
 
         //
@@ -285,6 +306,14 @@ namespace Nexus {
         //
 
         std::vector<OreHit> ores {};
+
+        //
+        // Cached merged Ore ESP geometry.
+        //
+
+        std::vector<OreMeshQuad> oreMesh {};
+
+        std::vector<OreOutlineLine> oreOutlineLines {};
 
         std::vector<CaveHit> caves {};
 
@@ -333,6 +362,12 @@ namespace Nexus {
         // Boundary-only Cave ESP outline.
         //
         std::vector<CaveOutlineLine> caveOutlineLines {};
+
+        //
+        // Ore blocks or ore-type visibility changed.
+        // Rebuild the merged Ore ESP geometry on the next tick.
+        //
+        bool oreMeshDirty = true;
 
         //
         // Structural cave topology changed.
@@ -386,8 +421,13 @@ namespace Nexus {
         //
         // Cave filter setting state.
         //
+
         bool lastAirCheck3x3x3 = true;
         bool lastIgnoreSurface = true;
+
+        int lastOreRange = 64;
+        int lastCaveRange = 64;
+        int lastOreEnabledMask = -1;
 
         //
         // ============================================================

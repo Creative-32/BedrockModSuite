@@ -3,10 +3,14 @@
 namespace Nexus {
 
     struct XRaySettings {
+        //
         // Master
+        //
         bool enabled = true;
 
+        //
         // Ore ESP
+        //
         bool oreESP = true;
 
         bool diamond = true;
@@ -19,21 +23,43 @@ namespace Nexus {
         bool lapis = true;
         bool redstone = true;
 
-        // Cave / Path ESP
+        //
+        // Ore appearance / range
+        //
+        int oreRange = 64;
+        int oreOpacity = 80;
+        int oreBrightness = 100;
+
+        bool oreOutline = true;
+        bool oreFill = true;
+
+        //
+        // Cave ESP
+        //
         bool caveESP = true;
         bool airCheck3x3x3 = true;
         bool ignoreSurface = true;
 
-        // Scan / rendering
+        //
+        // Cave scan range
+        //
         int scanRange = 64;
-        int caveOpacity = 25;
 
-        bool outline = true;
-        bool fill = true;
+        //
+        // Cave appearance
+        //
+        int caveOpacity = 25;
+        int caveBrightness = 80;
+        int caveOutlineOpacity = 70;
+
+        int caveColorR = 0xA9;
+        int caveColorG = 0x5C;
+        int caveColorB = 0xFF;
+
+        bool caveOutline = true;
+        bool caveFill = true;
     };
 
-    // One shared settings object for the whole client.
-    // Later the scanner/renderer will read from this too.
     inline XRaySettings xRaySettings {};
 
 } // namespace Nexus

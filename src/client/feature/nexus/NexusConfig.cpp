@@ -91,23 +91,93 @@ std::filesystem::path NexusConfig::getConfigPath() {
 
                 xRaySettings.redstone = xray.value("redstone", xRaySettings.redstone);
 
+                //
+                // ============================================================
+                // ORE APPEARANCE
+                // ============================================================
+                //
+
+                xRaySettings.oreRange = xray.value("oreRange", xRaySettings.oreRange);
+
+                xRaySettings.oreOpacity = xray.value("oreOpacity", xRaySettings.oreOpacity);
+
+                xRaySettings.oreBrightness = xray.value("oreBrightness", xRaySettings.oreBrightness);
+
+                //
+                // Backward compatibility:
+                //
+                // Older Nexus configs had one shared "outline" and "fill"
+                // setting. Use those as fallbacks the first time the new
+                // independent settings are loaded.
+                //
+
+                bool legacyOutline = xray.value("outline", true);
+
+                bool legacyFill = xray.value("fill", true);
+
+                xRaySettings.oreOutline = xray.value("oreOutline", legacyOutline);
+
+                xRaySettings.oreFill = xray.value("oreFill", legacyFill);
+
+                //
+                // ============================================================
+                // CAVE ESP
+                // ============================================================
+                //
+
                 xRaySettings.caveESP = xray.value("caveESP", xRaySettings.caveESP);
 
                 xRaySettings.airCheck3x3x3 = xray.value("airCheck3x3x3", xRaySettings.airCheck3x3x3);
 
                 xRaySettings.ignoreSurface = xray.value("ignoreSurface", xRaySettings.ignoreSurface);
 
+                //
+                // Cave range / appearance
+                //
+
                 xRaySettings.scanRange = xray.value("scanRange", xRaySettings.scanRange);
 
                 xRaySettings.caveOpacity = xray.value("caveOpacity", xRaySettings.caveOpacity);
 
-                xRaySettings.outline = xray.value("outline", xRaySettings.outline);
+                xRaySettings.caveBrightness = xray.value("caveBrightness", xRaySettings.caveBrightness);
 
-                xRaySettings.fill = xray.value("fill", xRaySettings.fill);
+                xRaySettings.caveOutlineOpacity = xray.value("caveOutlineOpacity", xRaySettings.caveOutlineOpacity);
+
+                xRaySettings.caveColorR = xray.value("caveColorR", xRaySettings.caveColorR);
+
+                xRaySettings.caveColorG = xray.value("caveColorG", xRaySettings.caveColorG);
+
+                xRaySettings.caveColorB = xray.value("caveColorB", xRaySettings.caveColorB);
+
+                xRaySettings.caveOutline = xray.value("caveOutline", legacyOutline);
+
+                xRaySettings.caveFill = xray.value("caveFill", legacyFill);
+
+                //
+                // ============================================================
+                // CLAMP LOADED VALUES
+                // ============================================================
+                //
+
+                xRaySettings.oreRange = std::clamp(xRaySettings.oreRange, 16, 128);
+
+                xRaySettings.oreOpacity = std::clamp(xRaySettings.oreOpacity, 5, 100);
+
+                xRaySettings.oreBrightness = std::clamp(xRaySettings.oreBrightness, 10, 150);
 
                 xRaySettings.scanRange = std::clamp(xRaySettings.scanRange, 16, 128);
 
                 xRaySettings.caveOpacity = std::clamp(xRaySettings.caveOpacity, 5, 100);
+
+                xRaySettings.caveBrightness = std::clamp(xRaySettings.caveBrightness, 10, 150);
+
+                xRaySettings.caveOutlineOpacity = std::clamp(xRaySettings.caveOutlineOpacity, 5, 100);
+
+                xRaySettings.caveColorR = std::clamp(xRaySettings.caveColorR, 0, 255);
+
+                xRaySettings.caveColorG = std::clamp(xRaySettings.caveColorG, 0, 255);
+
+                xRaySettings.caveColorB = std::clamp(xRaySettings.caveColorB, 0, 255);
             }
         } catch (...) {
             menuKey = 'N';
@@ -150,7 +220,14 @@ std::filesystem::path NexusConfig::getConfigPath() {
 
         json["favoriteOrder"] = favoriteOrder;
 
-        json["xray"] = { { "enabled", xRaySettings.enabled },
+        json["xray"] = { //
+                         // Master
+                         //
+                         { "enabled", xRaySettings.enabled },
+
+                         //
+                         // Ore ESP
+                         //
                          { "oreESP", xRaySettings.oreESP },
 
                          { "diamond", xRaySettings.diamond },
@@ -163,15 +240,38 @@ std::filesystem::path NexusConfig::getConfigPath() {
                          { "lapis", xRaySettings.lapis },
                          { "redstone", xRaySettings.redstone },
 
+                         //
+                         // Ore appearance
+                         //
+                         { "oreRange", xRaySettings.oreRange },
+                         { "oreOpacity", xRaySettings.oreOpacity },
+                         { "oreBrightness", xRaySettings.oreBrightness },
+
+                         { "oreOutline", xRaySettings.oreOutline },
+                         { "oreFill", xRaySettings.oreFill },
+
+                         //
+                         // Cave ESP
+                         //
                          { "caveESP", xRaySettings.caveESP },
                          { "airCheck3x3x3", xRaySettings.airCheck3x3x3 },
                          { "ignoreSurface", xRaySettings.ignoreSurface },
 
+                         //
+                         // Cave appearance
+                         //
                          { "scanRange", xRaySettings.scanRange },
                          { "caveOpacity", xRaySettings.caveOpacity },
+                         { "caveBrightness", xRaySettings.caveBrightness },
+                         { "caveOutlineOpacity", xRaySettings.caveOutlineOpacity },
 
-                         { "outline", xRaySettings.outline },
-                         { "fill", xRaySettings.fill } };
+                         { "caveColorR", xRaySettings.caveColorR },
+                         { "caveColorG", xRaySettings.caveColorG },
+                         { "caveColorB", xRaySettings.caveColorB },
+
+                         { "caveOutline", xRaySettings.caveOutline },
+                         { "caveFill", xRaySettings.caveFill }
+        };
 
         std::ofstream file(path);
 

@@ -22,6 +22,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -164,82 +165,6 @@ namespace Nexus {
             int finalLevel = std::max(thicknessLevel, std::max(gapLevel, foregroundLevel));
 
             return static_cast<std::uint8_t>(std::clamp(finalLevel, 0, 7));
-        }
-
-        //
-        // ============================================================
-        // ORE BLOCK OUTLINE
-        // ============================================================
-        //
-
-        void drawOutlineBlock(MCDrawUtil3D& dc, BlockPos const& pos, d2d::Color const& color) {
-            float x = static_cast<float>(pos.x);
-            float y = static_cast<float>(pos.y);
-            float z = static_cast<float>(pos.z);
-
-            float x2 = x + 1.0f;
-            float y2 = y + 1.0f;
-            float z2 = z + 1.0f;
-
-            //
-            // Bottom
-            //
-            dc.drawLine({ x, y, z }, { x2, y, z }, color);
-
-            dc.drawLine({ x2, y, z }, { x2, y, z2 }, color);
-
-            dc.drawLine({ x2, y, z2 }, { x, y, z2 }, color);
-
-            dc.drawLine({ x, y, z2 }, { x, y, z }, color);
-
-            //
-            // Top
-            //
-            dc.drawLine({ x, y2, z }, { x2, y2, z }, color);
-
-            dc.drawLine({ x2, y2, z }, { x2, y2, z2 }, color);
-
-            dc.drawLine({ x2, y2, z2 }, { x, y2, z2 }, color);
-
-            dc.drawLine({ x, y2, z2 }, { x, y2, z }, color);
-
-            //
-            // Vertical
-            //
-            dc.drawLine({ x, y, z }, { x, y2, z }, color);
-
-            dc.drawLine({ x2, y, z }, { x2, y2, z }, color);
-
-            dc.drawLine({ x2, y, z2 }, { x2, y2, z2 }, color);
-
-            dc.drawLine({ x, y, z2 }, { x, y2, z2 }, color);
-        }
-
-        //
-        // ============================================================
-        // ORE BLOCK FILL
-        // ============================================================
-        //
-
-        void drawFilledBlock(MCDrawUtil3D& dc, BlockPos const& pos, d2d::Color const& color) {
-            float x = static_cast<float>(pos.x);
-            float y = static_cast<float>(pos.y);
-            float z = static_cast<float>(pos.z);
-
-            dc.fillQuad({ x, y, z }, { x + 1.f, y, z }, { x + 1.f, y, z + 1.f }, { x, y, z + 1.f }, color);
-
-            dc.fillQuad({ x, y + 1.f, z }, { x + 1.f, y + 1.f, z }, { x + 1.f, y + 1.f, z + 1.f },
-                        { x, y + 1.f, z + 1.f }, color);
-
-            dc.fillQuad({ x, y, z }, { x, y + 1.f, z }, { x + 1.f, y + 1.f, z }, { x + 1.f, y, z }, color);
-
-            dc.fillQuad({ x, y, z + 1.f }, { x, y + 1.f, z + 1.f }, { x + 1.f, y + 1.f, z + 1.f },
-                        { x + 1.f, y, z + 1.f }, color);
-
-            dc.fillQuad({ x, y, z }, { x, y + 1.f, z }, { x, y + 1.f, z + 1.f }, { x, y, z + 1.f }, color);
-
-            dc.fillQuad({ x + 1.f, y, z }, { x + 1.f, y + 1.f, z }, { x + 1.f, y + 1.f, z + 1.f },
-                        { x + 1.f, y, z + 1.f }, color);
         }
 
         //
@@ -416,10 +341,6 @@ namespace Nexus {
         scanZIndex = 0;
 
         scanInitialized = true;
-
-        pruneCachedOres(center, range);
-
-        pruneCachedCaves(center, range);
     }
 
     //
@@ -514,28 +435,27 @@ namespace Nexus {
     // ================================================================
     //
 
-    bool XRayScanner::containsOre(BlockPos const& pos) const {
-        for (auto const& ore : ores) {
-            if (ore.pos.x == pos.x && ore.pos.y == pos.y && ore.pos.z == pos.z) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     void XRayScanner::addOre(BlockPos const& pos, OreType type) {
         for (auto& ore : ores) {
             if (ore.pos.x == pos.x && ore.pos.y == pos.y && ore.pos.z == pos.z) {
-                ore.type = type;
+                if (ore.type != type) {
+                    ore.type = type;
+
+                    oreMeshDirty = true;
+                }
+
                 return;
             }
         }
 
         ores.push_back({ pos, type });
+
+        oreMeshDirty = true;
     }
 
     void XRayScanner::pruneCachedOres(BlockPos const& center, int range) {
+        std::size_t oldSize = ores.size();
+
         int keepRange = range + RecenterDistance;
 
         long long keepRangeSq = static_cast<long long>(keepRange) * static_cast<long long>(keepRange);
@@ -551,6 +471,14 @@ namespace Nexus {
 
             return distanceSq > keepRangeSq;
         });
+
+        //
+        // Cached geometry must be rebuilt whenever pruning
+        // actually removed one or more ore blocks.
+        //
+        if (ores.size() != oldSize) {
+            oreMeshDirty = true;
+        }
 
         if (oreValidationIndex >= ores.size()) {
             oreValidationIndex = 0;
@@ -579,11 +507,17 @@ namespace Nexus {
             if (!type.has_value()) {
                 ores.erase(ores.begin() + static_cast<std::ptrdiff_t>(oreValidationIndex));
 
+                oreMeshDirty = true;
+
                 if (oreValidationIndex >= ores.size()) {
                     oreValidationIndex = 0;
                 }
             } else {
-                ores[oreValidationIndex].type = *type;
+                if (ores[oreValidationIndex].type != *type) {
+                    ores[oreValidationIndex].type = *type;
+
+                    oreMeshDirty = true;
+                }
 
                 ++oreValidationIndex;
             }
@@ -594,12 +528,273 @@ namespace Nexus {
 
     //
     // ================================================================
-    // LITERAL AIR
+    // CACHED MERGED ORE MESH
     // ================================================================
     //
 
-    bool XRayScanner::isAirBlock(SDK::Block* block) const {
-        return classifyCaveBlockCached(block) == CaveBlockClass::Open;
+    void XRayScanner::rebuildOreMesh() {
+        oreMesh.clear();
+        oreOutlineLines.clear();
+
+        if (ores.empty()) {
+            oreMeshDirty = false;
+            return;
+        }
+
+        //
+        // ============================================================
+        // ENABLED ORE BLOCK LOOKUP
+        // ============================================================
+        //
+
+        struct OreBlockKey {
+            int x;
+            int y;
+            int z;
+
+            OreType type;
+
+            bool operator==(OreBlockKey const& other) const noexcept {
+                return x == other.x && y == other.y && z == other.z && type == other.type;
+            }
+        };
+
+        struct OreBlockKeyHash {
+            std::size_t operator()(OreBlockKey const& key) const noexcept {
+                std::size_t h = std::hash<int> {}(static_cast<int>(key.type));
+
+                h ^= std::hash<int> {}(key.x) + 0x9e3779b9 + (h << 6) + (h >> 2);
+
+                h ^= std::hash<int> {}(key.y) + 0x9e3779b9 + (h << 6) + (h >> 2);
+
+                h ^= std::hash<int> {}(key.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+
+                return h;
+            }
+        };
+
+        std::unordered_set<OreBlockKey, OreBlockKeyHash> oreBlocks;
+
+        oreBlocks.reserve(ores.size());
+
+        for (OreHit const& ore : ores) {
+            if (!isOreEnabled(ore.type)) {
+                continue;
+            }
+
+            oreBlocks.insert({ ore.pos.x, ore.pos.y, ore.pos.z, ore.type });
+        }
+
+        if (oreBlocks.empty()) {
+            oreMeshDirty = false;
+            return;
+        }
+
+        //
+        // ============================================================
+        // EXPOSED FACE PLANES
+        // ============================================================
+        //
+
+        using OreCell = std::pair<int, int>;
+
+        using OrePlaneKey = std::tuple<OreType, std::uint8_t, int>;
+
+        std::map<OrePlaneKey, std::set<OreCell>> orePlanes;
+
+        auto hasSameOre = [&](OreType type, int x, int y, int z) -> bool {
+            return oreBlocks.contains({ x, y, z, type });
+        };
+
+        for (OreHit const& ore : ores) {
+            if (!isOreEnabled(ore.type)) {
+                continue;
+            }
+
+            int x = ore.pos.x;
+            int y = ore.pos.y;
+            int z = ore.pos.z;
+
+            //
+            // Down
+            //
+            if (!hasSameOre(ore.type, x, y - 1, z)) {
+                orePlanes[{ ore.type, CaveFaceDown, y }].insert({ x, z });
+            }
+
+            //
+            // Up
+            //
+            if (!hasSameOre(ore.type, x, y + 1, z)) {
+                orePlanes[{ ore.type, CaveFaceUp, y + 1 }].insert({ x, z });
+            }
+
+            //
+            // North
+            //
+            if (!hasSameOre(ore.type, x, y, z - 1)) {
+                orePlanes[{ ore.type, CaveFaceNorth, z }].insert({ x, y });
+            }
+
+            //
+            // South
+            //
+            if (!hasSameOre(ore.type, x, y, z + 1)) {
+                orePlanes[{ ore.type, CaveFaceSouth, z + 1 }].insert({ x, y });
+            }
+
+            //
+            // West
+            //
+            if (!hasSameOre(ore.type, x - 1, y, z)) {
+                orePlanes[{ ore.type, CaveFaceWest, x }].insert({ z, y });
+            }
+
+            //
+            // East
+            //
+            if (!hasSameOre(ore.type, x + 1, y, z)) {
+                orePlanes[{ ore.type, CaveFaceEast, x + 1 }].insert({ z, y });
+            }
+        }
+
+        //
+        // ============================================================
+        // GREEDY-MERGED FILL QUADS
+        // ============================================================
+        //
+
+        for (auto const& [planeKey, sourceCells] : orePlanes) {
+            auto [type, face, plane] = planeKey;
+
+            std::set<OreCell> cells = sourceCells;
+
+            while (!cells.empty()) {
+                OreCell start = *cells.begin();
+
+                int startU = start.first;
+                int startV = start.second;
+
+                int width = 1;
+
+                while (cells.contains({ startU + width, startV })) {
+                    ++width;
+                }
+
+                int height = 1;
+
+                while (true) {
+                    bool completeRow = true;
+
+                    for (int offsetU = 0; offsetU < width; ++offsetU) {
+                        if (!cells.contains({ startU + offsetU, startV + height })) {
+                            completeRow = false;
+                            break;
+                        }
+                    }
+
+                    if (!completeRow) {
+                        break;
+                    }
+
+                    ++height;
+                }
+
+                for (int offsetV = 0; offsetV < height; ++offsetV) {
+                    for (int offsetU = 0; offsetU < width; ++offsetU) {
+                        cells.erase({ startU + offsetU, startV + offsetV });
+                    }
+                }
+
+                oreMesh.push_back({ type, face, plane, startU, startV, width, height });
+            }
+        }
+
+        //
+        // ============================================================
+        // BOUNDARY-ONLY OUTLINES
+        // ============================================================
+        //
+
+        for (auto const& [planeKey, cells] : orePlanes) {
+            auto [type, face, plane] = planeKey;
+
+            std::map<int, std::set<int>> horizontalEdges;
+            std::map<int, std::set<int>> verticalEdges;
+
+            for (OreCell const& cell : cells) {
+                int u = cell.first;
+                int v = cell.second;
+
+                if (!cells.contains({ u, v - 1 })) {
+                    horizontalEdges[v].insert(u);
+                }
+
+                if (!cells.contains({ u, v + 1 })) {
+                    horizontalEdges[v + 1].insert(u);
+                }
+
+                if (!cells.contains({ u - 1, v })) {
+                    verticalEdges[u].insert(v);
+                }
+
+                if (!cells.contains({ u + 1, v })) {
+                    verticalEdges[u + 1].insert(v);
+                }
+            }
+
+            //
+            // Horizontal segments.
+            //
+            for (auto& [fixedV, starts] : horizontalEdges) {
+                while (!starts.empty()) {
+                    int startU = *starts.begin();
+
+                    int length = 1;
+
+                    while (starts.contains(startU + length)) {
+                        ++length;
+                    }
+
+                    for (int offset = 0; offset < length; ++offset) {
+                        starts.erase(startU + offset);
+                    }
+
+                    Vec3 start = getCaveOutlinePoint(face, plane, startU, fixedV);
+
+                    Vec3 end = getCaveOutlinePoint(face, plane, startU + length, fixedV);
+
+                    oreOutlineLines.push_back({ start, end, type });
+                }
+            }
+
+            //
+            // Vertical segments.
+            //
+            for (auto& [fixedU, starts] : verticalEdges) {
+                while (!starts.empty()) {
+                    int startV = *starts.begin();
+
+                    int length = 1;
+
+                    while (starts.contains(startV + length)) {
+                        ++length;
+                    }
+
+                    for (int offset = 0; offset < length; ++offset) {
+                        starts.erase(startV + offset);
+                    }
+
+                    Vec3 start = getCaveOutlinePoint(face, plane, fixedU, startV);
+
+                    Vec3 end = getCaveOutlinePoint(face, plane, fixedU, startV + length);
+
+                    oreOutlineLines.push_back({ start, end, type });
+                }
+            }
+        }
+
+        oreMeshDirty = false;
     }
 
     //
@@ -1383,14 +1578,6 @@ namespace Nexus {
         }
 
         return info;
-    }
-
-    std::uint8_t XRayScanner::getLineSolidDepth(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const {
-        return getCaveRayInfo(region, start, end).solidDepth;
-    }
-
-    bool XRayScanner::isLineOccluded(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const {
-        return getLineSolidDepth(region, start, end) > 0;
     }
 
     //
@@ -2454,6 +2641,14 @@ namespace Nexus {
 
         long long rangeSq = static_cast<long long>(range) * static_cast<long long>(range);
 
+        int oreRange = std::clamp(xRaySettings.oreRange, 16, 128);
+
+        int caveRange = std::clamp(xRaySettings.scanRange, 16, 128);
+
+        long long oreRangeSq = static_cast<long long>(oreRange) * static_cast<long long>(oreRange);
+
+        long long caveRangeSq = static_cast<long long>(caveRange) * static_cast<long long>(caveRange);
+
         int blockBudget = xRaySettings.caveESP ? BlocksPerTickWithCaves : BlocksPerTickOreOnly;
 
         int scanned = 0;
@@ -2505,7 +2700,7 @@ namespace Nexus {
             //
             // Ore ESP
             //
-            if (xRaySettings.oreESP) {
+            if (xRaySettings.oreESP && distanceSq <= oreRangeSq) {
                 auto oreType = classifyOre(block);
 
                 if (oreType.has_value()) {
@@ -2516,7 +2711,7 @@ namespace Nexus {
             //
             // Cave ESP
             //
-            if (xRaySettings.caveESP && isCaveSpaceBlock(block)) {
+            if (xRaySettings.caveESP && distanceSq <= caveRangeSq && isCaveSpaceBlock(block)) {
                 if (!isCaveAirCandidate(region, pos)) {
                     continue;
                 }
@@ -2572,7 +2767,10 @@ namespace Nexus {
         //
         if (!tick.getLevel()) {
             ores.clear();
+            oreMesh.clear();
+            oreOutlineLines.clear();
 
+            oreMeshDirty = true;
             caves.clear();
             caveIndex.clear();
             caveBlockClassCache.clear();
@@ -2601,7 +2799,10 @@ namespace Nexus {
         //
         if (!xRaySettings.enabled) {
             ores.clear();
+            oreMesh.clear();
+            oreOutlineLines.clear();
 
+            oreMeshDirty = true;
             caves.clear();
             caveIndex.clear();
             caveBlockClassCache.clear();
@@ -2630,7 +2831,10 @@ namespace Nexus {
         //
         if (!xRaySettings.oreESP && !xRaySettings.caveESP) {
             ores.clear();
+            oreMesh.clear();
+            oreOutlineLines.clear();
 
+            oreMeshDirty = true;
             caves.clear();
             caveIndex.clear();
             caveBlockClassCache.clear();
@@ -2658,7 +2862,13 @@ namespace Nexus {
         // Ore ESP disabled.
         //
         if (!xRaySettings.oreESP) {
+
             ores.clear();
+            oreMesh.clear();
+            oreOutlineLines.clear();
+
+            oreMeshDirty = true;
+
             oreValidationIndex = 0;
         }
 
@@ -2682,6 +2892,56 @@ namespace Nexus {
             caveMeshDirty = true;
 
             caveRegionRebuildTimer = 0;
+        }
+
+        //
+        // ============================================================
+        // ORE TYPE VISIBILITY STATE
+        // ============================================================
+        //
+
+        int oreEnabledMask = 0;
+
+        if (xRaySettings.diamond) {
+            oreEnabledMask |= 1 << 0;
+        }
+
+        if (xRaySettings.ancientDebris) {
+            oreEnabledMask |= 1 << 1;
+        }
+
+        if (xRaySettings.emerald) {
+            oreEnabledMask |= 1 << 2;
+        }
+
+        if (xRaySettings.gold) {
+            oreEnabledMask |= 1 << 3;
+        }
+
+        if (xRaySettings.iron) {
+            oreEnabledMask |= 1 << 4;
+        }
+
+        if (xRaySettings.copper) {
+            oreEnabledMask |= 1 << 5;
+        }
+
+        if (xRaySettings.coal) {
+            oreEnabledMask |= 1 << 6;
+        }
+
+        if (xRaySettings.lapis) {
+            oreEnabledMask |= 1 << 7;
+        }
+
+        if (xRaySettings.redstone) {
+            oreEnabledMask |= 1 << 8;
+        }
+
+        if (oreEnabledMask != lastOreEnabledMask) {
+            lastOreEnabledMask = oreEnabledMask;
+
+            oreMeshDirty = true;
         }
 
         auto clientInstance = SDK::ClientInstance::get();
@@ -2717,7 +2977,40 @@ namespace Nexus {
 
                           static_cast<int>(std::floor(playerPos.z)) };
 
-        int range = std::clamp(xRaySettings.scanRange, 16, 128);
+        int oreRange = std::clamp(xRaySettings.oreRange, 16, 128);
+
+        int caveRange = std::clamp(xRaySettings.scanRange, 16, 128);
+
+        bool featureRangeChanged = lastOreRange != oreRange || lastCaveRange != caveRange;
+
+        if (featureRangeChanged) {
+            if (xRaySettings.oreESP) {
+                pruneCachedOres(center, oreRange);
+            }
+
+            if (xRaySettings.caveESP) {
+                pruneCachedCaves(center, caveRange);
+            }
+
+            lastOreRange = oreRange;
+            lastCaveRange = caveRange;
+
+            //
+            // Restart the incremental scan so an increased range
+            // begins populating immediately.
+            //
+            scanInitialized = false;
+        }
+
+        int range = 16;
+
+        if (xRaySettings.oreESP) {
+            range = std::max(range, oreRange);
+        }
+
+        if (xRaySettings.caveESP) {
+            range = std::max(range, caveRange);
+        }
 
         bool needsReset = !scanInitialized || activeRange != range;
 
@@ -2733,6 +3026,14 @@ namespace Nexus {
 
         if (needsReset) {
             resetScan(center, range);
+
+            if (xRaySettings.oreESP) {
+                pruneCachedOres(center, oreRange);
+            }
+
+            if (xRaySettings.caveESP) {
+                pruneCachedCaves(center, caveRange);
+            }
         }
 
         if (xRaySettings.oreESP) {
@@ -2747,6 +3048,14 @@ namespace Nexus {
         // Shared incremental scan.
         //
         scanBlocks(region);
+
+        //
+        // Rebuild merged Ore ESP geometry only when the Ore cache
+        // or ore-type visibility has actually changed.
+        //
+        if (xRaySettings.oreESP && oreMeshDirty) {
+            rebuildOreMesh();
+        }
 
         //
         // Cave post-processing.
@@ -2806,9 +3115,11 @@ namespace Nexus {
             return;
         }
 
-        bool renderOres = xRaySettings.oreESP && !ores.empty();
+        bool renderOres = xRaySettings.oreESP && ((xRaySettings.oreFill && !oreMesh.empty()) ||
+                                                  (xRaySettings.oreOutline && !oreOutlineLines.empty()));
 
-        bool renderCaves = xRaySettings.caveESP && ((xRaySettings.fill && !caveMesh.empty()) || (xRaySettings.outline && !caveOutlineLines.empty()));
+        bool renderCaves = xRaySettings.caveESP && ((xRaySettings.caveFill && !caveMesh.empty()) ||
+                                                    (xRaySettings.caveOutline && !caveOutlineLines.empty()));
 
         if (!renderOres && !renderCaves) {
             return;
@@ -2836,77 +3147,83 @@ namespace Nexus {
         // ============================================================
         //
 
-        auto getOreColor = [](OreType type) -> d2d::Color {
+        auto getOreColor = [&](OreType type) -> d2d::Color {
+            float brightness = std::clamp(static_cast<float>(xRaySettings.oreBrightness) / 100.0f, 0.10f, 1.50f);
+
+            auto channel = [&](int value) -> int {
+                return std::clamp(static_cast<int>(std::lround(static_cast<float>(value) * brightness)), 0, 255);
+            };
+
             switch (type) {
             case OreType::Diamond:
-                return d2d::Color::RGB(0x42, 0xE6, 0xD5);
+                return d2d::Color::RGB(channel(0x42), channel(0xE6), channel(0xD5));
 
             case OreType::Emerald:
-                return d2d::Color::RGB(0x35, 0xD0, 0x63);
+                return d2d::Color::RGB(channel(0x35), channel(0xD0), channel(0x63));
 
             case OreType::Gold:
-                return d2d::Color::RGB(0xF5, 0xD4, 0x42);
+                return d2d::Color::RGB(channel(0xF5), channel(0xD4), channel(0x42));
 
             case OreType::Iron:
-                return d2d::Color::RGB(0xD8, 0xC5, 0xB0);
+                return d2d::Color::RGB(channel(0xD8), channel(0xC5), channel(0xB0));
 
             case OreType::Redstone:
-                return d2d::Color::RGB(0xE0, 0x35, 0x35);
+                return d2d::Color::RGB(channel(0xE0), channel(0x35), channel(0x35));
 
             case OreType::Lapis:
-                return d2d::Color::RGB(0x38, 0x68, 0xD8);
+                return d2d::Color::RGB(channel(0x38), channel(0x68), channel(0xD8));
 
             case OreType::Coal:
-                return d2d::Color::RGB(0x70, 0x70, 0x70);
+                return d2d::Color::RGB(channel(0x70), channel(0x70), channel(0x70));
 
             case OreType::Copper:
-                return d2d::Color::RGB(0xD7, 0x7A, 0x45);
+                return d2d::Color::RGB(channel(0xD7), channel(0x7A), channel(0x45));
 
             case OreType::AncientDebris:
-                return d2d::Color::RGB(0x9C, 0x64, 0x4B);
+                return d2d::Color::RGB(channel(0x9C), channel(0x64), channel(0x4B));
             }
 
-            return d2d::Color::RGB(0xFF, 0xFF, 0xFF);
+            return d2d::Color::RGB(channel(0xFF), channel(0xFF), channel(0xFF));
         };
 
         //
         // ============================================================
-        // ORE FILLS
+        // CACHED MERGED ORE VEINS
         // ============================================================
         //
 
-        if (renderOres && xRaySettings.fill) {
-            for (auto const& ore : ores) {
-                if (!isOreEnabled(ore.type)) {
-                    continue;
+        if (renderOres) {
+            float requestedOreOpacity = std::clamp(static_cast<float>(xRaySettings.oreOpacity) / 100.0f, 0.05f, 1.0f);
+
+            float oreFillAlpha = std::clamp(requestedOreOpacity * 0.35f, 0.02f, 0.35f);
+
+            float oreOutlineAlpha = std::clamp(requestedOreOpacity, 0.05f, 1.0f);
+
+            //
+            // Cached merged fill.
+            //
+            if (xRaySettings.oreFill) {
+                for (OreMeshQuad const& quad : oreMesh) {
+                    d2d::Color fillColor = getOreColor(quad.type).asAlpha(oreFillAlpha);
+
+                    drawCaveMeshFill(dc, quad.face, quad.plane, quad.u, quad.v, quad.width, quad.height, fillColor);
                 }
 
-                d2d::Color color = getOreColor(ore.type).asAlpha(0.18f);
-
-                drawFilledBlock(dc, ore.pos, color);
+                dc.flush();
             }
 
-            dc.flush();
-        }
+            //
+            // Cached vein boundary.
+            //
+            if (xRaySettings.oreOutline) {
+                for (OreOutlineLine const& line : oreOutlineLines) {
+                    d2d::Color outlineColor = getOreColor(line.type).asAlpha(oreOutlineAlpha);
 
-        //
-        // ============================================================
-        // ORE OUTLINES
-        // ============================================================
-        //
-
-        if (renderOres && xRaySettings.outline) {
-            for (auto const& ore : ores) {
-                if (!isOreEnabled(ore.type)) {
-                    continue;
+                    dc.drawLine(line.start, line.end, outlineColor);
                 }
 
-                d2d::Color color = getOreColor(ore.type).asAlpha(0.95f);
-
-                drawOutlineBlock(dc, ore.pos, color);
+                dc.flush();
             }
-
-            dc.flush();
         }
 
         //
@@ -2916,19 +3233,41 @@ namespace Nexus {
         //
 
         if (renderCaves) {
-            d2d::Color caveColor = d2d::Color::RGB(0xA9, 0x5C, 0xFF);
+            //
+            // ============================================================
+            // USER-EDITABLE CAVE APPEARANCE
+            // ============================================================
+            //
 
-            float requestedOpacity = std::clamp(static_cast<float>(xRaySettings.caveOpacity) / 100.0f,
+            int baseR = std::clamp(xRaySettings.caveColorR, 0, 255);
+            int baseG = std::clamp(xRaySettings.caveColorG, 0, 255);
+            int baseB = std::clamp(xRaySettings.caveColorB, 0, 255);
 
-                                                0.05f, 1.0f);
+            float brightness = std::clamp(static_cast<float>(xRaySettings.caveBrightness) / 100.0f, 0.10f, 1.50f);
 
-            float fillAlpha = std::clamp(requestedOpacity * 0.45f,
+            auto applyBrightness = [brightness](int channel) -> std::uint8_t {
+                int adjusted = static_cast<int>(static_cast<float>(channel) * brightness + 0.5f);
 
-                                         0.03f, 0.45f);
+                return static_cast<std::uint8_t>(std::clamp(adjusted, 0, 255));
+            };
 
-            float outlineAlpha = std::clamp(0.35f + requestedOpacity * 0.50f,
+            d2d::Color caveColor =
+                d2d::Color::RGB(applyBrightness(baseR), applyBrightness(baseG), applyBrightness(baseB));
 
-                                            0.40f, 0.85f);
+            //
+            // Fill opacity.
+            //
+            float requestedOpacity = std::clamp(static_cast<float>(xRaySettings.caveOpacity) / 100.0f, 0.05f, 1.0f);
+
+            float fillAlpha = std::clamp(requestedOpacity * 0.45f, 0.03f, 0.45f);
+
+            //
+            // Independent outline opacity.
+            //
+            float requestedOutlineOpacity =
+                std::clamp(static_cast<float>(xRaySettings.caveOutlineOpacity) / 100.0f, 0.05f, 1.0f);
+
+            float outlineAlpha = requestedOutlineOpacity;
 
             //
             // ========================================================
@@ -2978,7 +3317,7 @@ namespace Nexus {
             //
             // Cave fill.
             //
-            if (xRaySettings.fill) {
+            if (xRaySettings.caveFill) {
                 for (CaveMeshQuad const& quad : caveMesh) {
                     float quadAlpha = fillAlpha * depthFillMultiplier(quad.depthBucket);
 
@@ -2993,7 +3332,7 @@ namespace Nexus {
             //
             // Cave boundary outline.
             //
-            if (xRaySettings.outline) {
+            if (xRaySettings.caveOutline) {
                 for (CaveOutlineLine const& line : caveOutlineLines) {
                     float lineAlpha = outlineAlpha * depthOutlineMultiplier(line.depthLevel);
 
