@@ -1358,28 +1358,24 @@ namespace Nexus {
             //
             // Count solid terrain crossed.
             //
-            // The depth renderer saturates at 8 solid voxels:
-            //
-            // 1 block  -> level 0
-            // ...
-            // 8+ blocks -> level 7
-            //
-            // Once 8 solid blocks have been found, continuing the DDA
-            // cannot change visibility or the final depth level.
+            // Cave depth rendering only has useful thickness information
+            // through 8 solid voxels. At 8+ blocks, the thickness component
+            // is already at its maximum level.
             //
             if (info.solidDepth < 8) {
                 ++info.solidDepth;
             }
 
             //
-            // We already know:
+            // Once 8 solid blocks have been crossed, continuing this DDA
+            // cannot change any value used by Cave ESP:
             //
-            // - the ray is occluded
-            // - firstSolidDistance
-            // - targetDistance
-            // - maximum terrain-thickness level
+            // - the ray is already known to be occluded
+            // - firstSolidDistance is already known
+            // - targetDistance was calculated before traversal
+            // - solidDepth has reached the maximum useful depth level
             //
-            // No additional voxel traversal can affect Cave ESP.
+            // Stop tracing through additional terrain.
             //
             if (info.solidDepth >= 8) {
                 break;
@@ -1403,7 +1399,7 @@ namespace Nexus {
     // ================================================================
     //
 
-        void XRayScanner::updateCaveOcclusion(SDK::BlockSource* region, Vec3 const& viewOrigin) {
+    void XRayScanner::updateCaveOcclusion(SDK::BlockSource* region, Vec3 const& viewOrigin) {
         if (!region || caves.empty()) {
             caveNearOcclusionIndex = 0;
             caveFarOcclusionIndex = 0;
