@@ -4,6 +4,7 @@
 #include "client/event/Listener.h"
 #include "util/LMath.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -13,6 +14,7 @@
 
 namespace SDK {
     class Block;
+    class BlockLegacy;
     class BlockSource;
 }
 
@@ -40,6 +42,30 @@ namespace Nexus {
             AncientDebris
         };
 
+        enum class CaveBlockClass {
+            Open,
+            Partial,
+            Solid,
+            Fluid
+        };
+
+        struct CaveRayInfo {
+            //
+            // Number of solid voxels crossed by the ray.
+            //
+            std::uint8_t solidDepth = 0;
+
+            //
+            // Distance from the camera to the first solid obstruction.
+            //
+            float firstSolidDistance = 0.0f;
+
+            //
+            // Full distance from the camera to the cave face.
+            //
+            float targetDistance = 0.0f;
+        };
+
         struct OreHit {
             BlockPos pos;
             OreType type;
@@ -54,16 +80,45 @@ namespace Nexus {
             std::uint8_t faces = 0;
 
             //
-            // View-dependent subset of structural faces currently
-            // hidden behind terrain.
+            // Currently accepted view-dependent hidden faces.
             //
             std::uint8_t occludedFaces = 0;
 
             //
-            // True when this cell belongs to a cave region large
-            // enough to be useful.
+            // Most recent candidate occlusion result.
+            //
+            std::uint8_t pendingOccludedFaces = 0;
+
+            //
+            // Number of consecutive matching candidate results.
+            //
+            std::uint8_t occlusionConfirmations = 0;
+
+            //
+            // True when this cell belongs to a useful cave region.
             //
             bool regionVisible = false;
+
+            //
+            // Terrain-depth bucket for each face.
+            //
+            // Index order:
+            //
+            // 0 = Down
+            // 1 = Up
+            // 2 = North
+            // 3 = South
+            // 4 = West
+            // 5 = East
+            //
+            // Depth levels:
+            //
+            // 0 = strongest normal Cave ESP
+            // 1-6 = progressively deeper / more separated
+            // 7 = weakest normal Cave ESP
+            // 8 = special extremely-close foreground protection
+            //
+            std::array<std::uint8_t, 6> depthBuckets {};
         };
 
         //
@@ -79,6 +134,11 @@ namespace Nexus {
 
             int width = 1;
             int height = 1;
+
+            //
+            // Depth bucket shared by every face merged into this quad.
+            //
+            std::uint8_t depthBucket = 0;
         };
 
         struct BlockKey {
@@ -146,6 +206,16 @@ namespace Nexus {
         // ============================================================
         //
 
+        //
+        // Full block-ID classification.
+        //
+        CaveBlockClass classifyCaveBlock(SDK::Block* block) const;
+
+        //
+        // Cached classification used by hot scan/ray paths.
+        //
+        CaveBlockClass classifyCaveBlockCached(SDK::Block* block) const;
+
         bool isAirBlock(SDK::Block* block) const;
 
         bool isCaveSpaceBlock(SDK::Block* block) const;
@@ -188,7 +258,11 @@ namespace Nexus {
 
         static Vec3 getCaveFaceCenter(BlockPos const& pos, std::uint8_t face);
 
+        CaveRayInfo getCaveRayInfo(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const;
+
         bool isLineOccluded(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const;
+
+        std::uint8_t getLineSolidDepth(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const;
 
         void updateCaveOcclusion(SDK::BlockSource* region, Vec3 const& viewOrigin);
 
@@ -197,6 +271,8 @@ namespace Nexus {
         // GREEDY CAVE MESH
         // ============================================================
         //
+
+        void rebuildCaveRenderableMask();
 
         void rebuildCaveMesh();
 
@@ -214,7 +290,49 @@ namespace Nexus {
 
         std::unordered_map<BlockKey, std::size_t, BlockKeyHash> caveIndex {};
 
+        //
+        // ============================================================
+        // CAVE BLOCK CLASSIFICATION CACHE
+        // ============================================================
+        //
+        // Cave classification only depends on BlockLegacy ID.
+        //
+        // Many individual world blocks share the same BlockLegacy, so
+        // this avoids repeatedly constructing/comparing block-ID
+        // strings during scanner and DDA ray work.
+        //
+        mutable std::unordered_map<SDK::BlockLegacy*, CaveBlockClass> caveBlockClassCache {};
+
+        //
+        // Cached result of the post-occlusion fragment filter.
+        //
+        // Index corresponds directly to caves[].
+        //
+        // 0 = do not render
+        // 1 = accepted rendered fragment
+        //
+        std::vector<std::uint8_t> caveRenderableMask {};
+
+        //
+        // Depth-aware mesh used for Cave ESP fill.
+        //
         std::vector<CaveMeshQuad> caveMesh {};
+
+        struct CaveOutlineLine {
+            Vec3 start;
+            Vec3 end;
+
+            //
+            // 0-7 = normal smoothed depth
+            // 8   = close-foreground suppression
+            //
+            std::uint8_t depthLevel = 0;
+        };
+
+        //
+        // Boundary-only Cave ESP outline.
+        //
+        std::vector<CaveOutlineLine> caveOutlineLines {};
 
         //
         // Structural cave topology changed.
@@ -222,7 +340,14 @@ namespace Nexus {
         bool caveRegionsDirty = true;
 
         //
-        // Renderable cave faces changed.
+        // Rendered-fragment connectivity needs to be rebuilt.
+        //
+        // This is only necessary when cave visibility/topology changes.
+        //
+        bool caveRenderableDirty = true;
+
+        //
+        // Fill depth levels or visible cave geometry changed.
         //
         bool caveMeshDirty = true;
 
@@ -248,7 +373,13 @@ namespace Nexus {
 
         std::size_t oreValidationIndex = 0;
         std::size_t caveValidationIndex = 0;
-        std::size_t caveOcclusionIndex = 0;
+
+        //
+        // Separate round-robin cursors for nearby and distant cave
+        // occlusion updates.
+        //
+        std::size_t caveNearOcclusionIndex = 0;
+        std::size_t caveFarOcclusionIndex = 0;
 
         bool scanInitialized = false;
 
@@ -269,8 +400,33 @@ namespace Nexus {
 
         static constexpr int OreValidationPerTick = 32;
         static constexpr int CaveValidationPerTick = 64;
-        static constexpr int CaveOcclusionCellsPerTick = 256;
 
+        //
+        // Maximum number of per-face DDA occlusion rays performed each tick.
+        //
+        // Unlike the old cell budget, this directly limits the expensive work.
+        // A cave cell with 1 structural face costs 1 ray.
+        // A cave cell with 6 structural faces costs 6 rays.
+        //
+        //
+        // Hard upper limit for all Cave ESP DDA rays in one tick.
+        //
+        static constexpr int CaveOcclusionRaysPerTick = 512;
+
+        //
+        // Reserve the first portion of the ray budget for caves close
+        // enough that camera movement and foreground separation are
+        // visually important.
+        //
+        // Any unused near budget automatically becomes available to
+        // the distant pass.
+        //
+        static constexpr int CaveNearOcclusionRaysPerTick = 384;
+
+        //
+        // Caves within this distance are considered high priority.
+        //
+        static constexpr float CaveNearOcclusionDistance = 32.0f;
         static constexpr int CaveRegionRebuildIntervalTicks = 5;
 
         static constexpr int RecenterDistance = 8;
@@ -302,6 +458,21 @@ namespace Nexus {
 
         static constexpr int MinimumCaveRegionSize = 8;
         static constexpr int MinimumCaveRegionSpan = 6;
+
+        //
+        // ============================================================
+        // RENDERED CAVE FRAGMENT FILTER
+        // ============================================================
+        //
+        // After view-dependent occlusion, one valid cave can appear
+        // as several disconnected rendered pieces.
+        //
+        // This filter removes tiny rendered fragments without
+        // affecting the actual structural cave-region filter.
+        //
+
+        static constexpr int MinimumRenderedFragmentCells = 6;
+        static constexpr int MinimumRenderedFragmentSpan = 4;
     };
 
 } // namespace Nexus

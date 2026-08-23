@@ -21,6 +21,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -50,6 +51,120 @@ namespace Nexus {
                                                   CaveFaceSouth, CaveFaceWest, CaveFaceEast };
 
         constexpr float CaveFaceInset = 0.01f;
+
+        //
+        // ============================================================
+        // CAVE FACE INDEX
+        // ============================================================
+        //
+
+        constexpr std::size_t caveFaceIndex(std::uint8_t face) {
+            if (face == CaveFaceDown) {
+                return 0;
+            }
+
+            if (face == CaveFaceUp) {
+                return 1;
+            }
+
+            if (face == CaveFaceNorth) {
+                return 2;
+            }
+
+            if (face == CaveFaceSouth) {
+                return 3;
+            }
+
+            if (face == CaveFaceWest) {
+                return 4;
+            }
+
+            return 5;
+        }
+
+        //
+        // ============================================================
+        // SMOOTH CAVE DEPTH LEVEL
+        // ============================================================
+        //
+        // Levels 0-7 handle normal depth fading.
+        //
+        // Level 8 is reserved for terrain extremely close to the
+        // camera. This preserves the close-wall foreground protection.
+        //
+
+        std::uint8_t caveDepthLevel(std::uint8_t solidDepth, float hiddenDistance, float firstSolidDistance) {
+            //
+            // ========================================================
+            // SPECIAL CLOSE-FOREGROUND PROTECTION
+            // ========================================================
+            //
+            // Keep this separate from normal smoothing.
+            //
+            // This is the behavior that stopped nearby stone/ore from
+            // being washed over by stacked Cave ESP surfaces.
+            //
+            if (firstSolidDistance <= 1.5f) {
+                return 8;
+            }
+
+            //
+            // ========================================================
+            // TERRAIN THICKNESS LEVEL
+            // ========================================================
+            //
+            // 1 solid block -> level 0
+            // 2 solid blocks -> level 1
+            // ...
+            // 8+ solid blocks -> level 7
+            //
+
+            int thicknessLevel = std::clamp(static_cast<int>(solidDepth) - 1, 0, 7);
+
+            //
+            // ========================================================
+            // HIDDEN-GAP LEVEL
+            // ========================================================
+            //
+            // Cave wall <= 2 blocks behind the first obstruction:
+            // level 0.
+            //
+            // Cave wall >= 10 blocks behind the first obstruction:
+            // level 7.
+            //
+            // Everything between is gradual.
+            //
+
+            float gapSeverity = std::clamp((hiddenDistance - 2.0f) / 8.0f, 0.0f, 1.0f);
+
+            int gapLevel = static_cast<int>(std::lround(gapSeverity * 7.0f));
+
+            //
+            // ========================================================
+            // FOREGROUND-PROXIMITY LEVEL
+            // ========================================================
+            //
+            // The special <= 1.5 block case was already handled above.
+            //
+            // Around 3 blocks from the camera:
+            // strongest normal suppression, level 7.
+            //
+            // Around 8+ blocks:
+            // little/no proximity suppression.
+            //
+
+            float foregroundSeverity = std::clamp((8.0f - firstSolidDistance) / 5.0f, 0.0f, 1.0f);
+
+            int foregroundLevel = static_cast<int>(std::lround(foregroundSeverity * 7.0f));
+
+            //
+            // Whichever depth-separation effect is strongest wins.
+            //
+
+            int finalLevel = std::max(thicknessLevel, std::max(gapLevel, foregroundLevel));
+
+            return static_cast<std::uint8_t>(std::clamp(finalLevel, 0, 7));
+        }
 
         //
         // ============================================================
@@ -188,70 +303,52 @@ namespace Nexus {
 
         //
         // ============================================================
-        // GREEDY CAVE MESH OUTLINE
+        // CAVE OUTLINE POINT
         // ============================================================
         //
+        // Converts the 2D coordinates used by each cave plane back
+        // into a 3D world-space point.
+        //
 
-        void drawCaveMeshOutline(MCDrawUtil3D& dc, std::uint8_t face, int plane, int u, int v, int width, int height,
-                                 d2d::Color const& color) {
+        Vec3 getCaveOutlinePoint(std::uint8_t face, int plane, int u, int v) {
             float p = static_cast<float>(plane);
 
-            float u0 = static_cast<float>(u);
-
-            float v0 = static_cast<float>(v);
-
-            float u1 = static_cast<float>(u + width);
-
-            float v1 = static_cast<float>(v + height);
+            float uf = static_cast<float>(u);
+            float vf = static_cast<float>(v);
 
             //
             // Down / Up
             //
+            // U = X
+            // V = Z
+            //
             if (face == CaveFaceDown || face == CaveFaceUp) {
                 float y = face == CaveFaceDown ? p + CaveFaceInset : p - CaveFaceInset;
 
-                dc.drawLine({ u0, y, v0 }, { u1, y, v0 }, color);
-
-                dc.drawLine({ u1, y, v0 }, { u1, y, v1 }, color);
-
-                dc.drawLine({ u1, y, v1 }, { u0, y, v1 }, color);
-
-                dc.drawLine({ u0, y, v1 }, { u0, y, v0 }, color);
-
-                return;
+                return { uf, y, vf };
             }
 
             //
             // North / South
             //
+            // U = X
+            // V = Y
+            //
             if (face == CaveFaceNorth || face == CaveFaceSouth) {
                 float z = face == CaveFaceNorth ? p + CaveFaceInset : p - CaveFaceInset;
 
-                dc.drawLine({ u0, v0, z }, { u1, v0, z }, color);
-
-                dc.drawLine({ u1, v0, z }, { u1, v1, z }, color);
-
-                dc.drawLine({ u1, v1, z }, { u0, v1, z }, color);
-
-                dc.drawLine({ u0, v1, z }, { u0, v0, z }, color);
-
-                return;
+                return { uf, vf, z };
             }
 
             //
             // West / East
             //
-            if (face == CaveFaceWest || face == CaveFaceEast) {
-                float x = face == CaveFaceWest ? p + CaveFaceInset : p - CaveFaceInset;
+            // U = Z
+            // V = Y
+            //
+            float x = face == CaveFaceWest ? p + CaveFaceInset : p - CaveFaceInset;
 
-                dc.drawLine({ x, v0, u0 }, { x, v0, u1 }, color);
-
-                dc.drawLine({ x, v0, u1 }, { x, v1, u1 }, color);
-
-                dc.drawLine({ x, v1, u1 }, { x, v1, u0 }, color);
-
-                dc.drawLine({ x, v1, u0 }, { x, v0, u0 }, color);
-            }
+            return { x, vf, uf };
         }
 
     } // namespace
@@ -502,13 +599,7 @@ namespace Nexus {
     //
 
     bool XRayScanner::isAirBlock(SDK::Block* block) const {
-        if (!block || !block->legacyBlock) {
-            return false;
-        }
-
-        std::string id = block->legacyBlock->namespacedId.getString();
-
-        return id == "minecraft:air" || id == "minecraft:cave_air" || id == "minecraft:void_air";
+        return classifyCaveBlockCached(block) == CaveBlockClass::Open;
     }
 
     //
@@ -517,38 +608,70 @@ namespace Nexus {
     // ================================================================
     //
 
-    bool XRayScanner::isCaveSpaceBlock(SDK::Block* block) const {
+    XRayScanner::CaveBlockClass XRayScanner::classifyCaveBlock(SDK::Block* block) const {
         if (!block || !block->legacyBlock) {
-            return false;
-        }
-
-        if (isAirBlock(block)) {
-            return true;
+            //
+            // Unknown/unloaded blocks should be conservative.
+            //
+            return CaveBlockClass::Solid;
         }
 
         std::string id = block->legacyBlock->namespacedId.getString();
 
         //
+        // ============================================================
+        // OPEN
+        // ============================================================
+        //
+
+        if (id == "minecraft:air" || id == "minecraft:cave_air" || id == "minecraft:void_air") {
+            return CaveBlockClass::Open;
+        }
+
+        //
+        // ============================================================
+        // FLUID
+        // ============================================================
+        //
+        // Fluids occupy cave volume, but they should not behave like
+        // solid stone for cave topology or visibility rays.
+        //
+
+        if (id == "minecraft:water" || id == "minecraft:flowing_water" || id == "minecraft:lava" ||
+            id == "minecraft:flowing_lava" || id == "minecraft:bubble_column") {
+            return CaveBlockClass::Fluid;
+        }
+
+        //
+        // ============================================================
+        // PARTIAL / NON-SOLID CONTENT
+        // ============================================================
+        //
+        // These blocks exist inside otherwise open cave volume.
+        // They should not create fake cave walls.
+        //
+
+        //
         // Torches / lights
         //
         if (id.find("torch") != std::string::npos) {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
         //
         // Rails
         //
         if (id == "minecraft:rail" || id.ends_with("_rail")) {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
         //
-        // Redstone
+        // Redstone / interactables
         //
         if (id == "minecraft:redstone_wire" || id == "minecraft:lever" || id == "minecraft:tripwire" ||
             id == "minecraft:tripwire_hook" || id.ends_with("_button") || id.ends_with("_pressure_plate") ||
             id.find("repeater") != std::string::npos || id.find("comparator") != std::string::npos) {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
         //
@@ -556,14 +679,14 @@ namespace Nexus {
         //
         if (id == "minecraft:ladder" || id == "minecraft:chain" || id == "minecraft:scaffolding" ||
             id.find("vine") != std::string::npos) {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
         //
         // Signs / banners
         //
         if (id.find("sign") != std::string::npos || id.find("banner") != std::string::npos) {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
         //
@@ -572,14 +695,14 @@ namespace Nexus {
         if (id == "minecraft:carpet" || id.ends_with("_carpet") || id == "minecraft:snow_layer" ||
             id == "minecraft:glow_lichen" || id == "minecraft:sculk_vein" || id == "minecraft:pink_petals" ||
             id == "minecraft:leaf_litter") {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
         //
-        // Fire / portal-like content
+        // Fire / portal-like blocks
         //
         if (id == "minecraft:fire" || id == "minecraft:soul_fire" || id == "minecraft:portal") {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
         //
@@ -588,11 +711,11 @@ namespace Nexus {
         if (id == "minecraft:cobweb" || id == "minecraft:flower_pot" || id == "minecraft:end_rod" ||
             id == "minecraft:lightning_rod" || id.find("candle") != std::string::npos ||
             id.find("coral_fan") != std::string::npos) {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
         //
-        // Plants
+        // Ordinary plants
         //
         if (id == "minecraft:short_grass" || id == "minecraft:tallgrass" || id == "minecraft:fern" ||
             id == "minecraft:large_fern" || id == "minecraft:deadbush" ||
@@ -612,7 +735,14 @@ namespace Nexus {
             id == "minecraft:warped_roots" || id == "minecraft:nether_sprouts" || id == "minecraft:hanging_roots" ||
 
             id == "minecraft:spore_blossom") {
-            return true;
+            return CaveBlockClass::Partial;
+        }
+
+        //
+        // Underwater plants
+        //
+        if (id == "minecraft:seagrass" || id == "minecraft:sea_pickle" || id.find("kelp") != std::string::npos) {
+            return CaveBlockClass::Partial;
         }
 
         //
@@ -622,10 +752,53 @@ namespace Nexus {
 
             id == "minecraft:small_amethyst_bud" || id == "minecraft:medium_amethyst_bud" ||
             id == "minecraft:large_amethyst_bud" || id == "minecraft:amethyst_cluster") {
-            return true;
+            return CaveBlockClass::Partial;
         }
 
-        return false;
+        //
+        // Everything else is considered structural terrain.
+        //
+        return CaveBlockClass::Solid;
+    }
+
+    //
+    // ================================================================
+    // CACHED CAVE BLOCK CLASSIFICATION
+    // ================================================================
+    //
+
+    XRayScanner::CaveBlockClass XRayScanner::classifyCaveBlockCached(SDK::Block* block) const {
+        //
+        // Unknown/unloaded blocks stay conservative.
+        //
+        if (!block || !block->legacyBlock) {
+            return CaveBlockClass::Solid;
+        }
+
+        SDK::BlockLegacy* legacy = block->legacyBlock;
+
+        auto found = caveBlockClassCache.find(legacy);
+
+        if (found != caveBlockClassCache.end()) {
+            return found->second;
+        }
+
+        //
+        // First time this BlockLegacy has been encountered in this
+        // cache. Run the full string-based classification once.
+        //
+        CaveBlockClass result = classifyCaveBlock(block);
+
+        caveBlockClassCache.emplace(legacy, result);
+
+        return result;
+    }
+
+    bool XRayScanner::isCaveSpaceBlock(SDK::Block* block) const {
+        CaveBlockClass blockClass = classifyCaveBlockCached(block);
+
+        return blockClass == CaveBlockClass::Open || blockClass == CaveBlockClass::Partial ||
+               blockClass == CaveBlockClass::Fluid;
     }
 
     //
@@ -800,9 +973,45 @@ namespace Nexus {
 
             cave.faces = faces;
 
+            //
+            // Remove stale face bits from both accepted and pending
+            // occlusion state.
+            //
             cave.occludedFaces &= faces;
+            cave.pendingOccludedFaces &= faces;
+
+            //
+            // Clear depth for structural faces that no longer exist.
+            //
+            for (std::uint8_t face : CaveFaceList) {
+                if ((faces & face) == 0) {
+                    cave.depthBuckets[caveFaceIndex(face)] = 0;
+                }
+            }
+
+            //
+            // Structural topology changed, so an old pending
+            // transition is no longer trustworthy.
+            //
+            if (oldFaces != cave.faces) {
+                cave.pendingOccludedFaces = cave.occludedFaces;
+                cave.occlusionConfirmations = 0;
+            }
 
             if (oldFaces != cave.faces || oldOccluded != cave.occludedFaces) {
+                //
+                // The fragment graph only cares whether this cave cell
+                // has ANY hidden face, not which particular faces are
+                // hidden.
+                //
+                bool oldRenderable = oldOccluded != 0;
+
+                bool newRenderable = cave.occludedFaces != 0;
+
+                if (oldRenderable != newRenderable) {
+                    caveRenderableDirty = true;
+                }
+
                 caveMeshDirty = true;
             }
 
@@ -815,11 +1024,12 @@ namespace Nexus {
         // New cave cells stay hidden until region classification
         // and occlusion testing have both run.
         //
-        caves.push_back({ pos, faces, 0, false });
+        caves.push_back({ pos, faces, 0, 0, 0, false });
 
         caveIndex.emplace(key, index);
 
         caveRegionsDirty = true;
+        caveRenderableDirty = true;
         caveMeshDirty = true;
     }
 
@@ -853,14 +1063,23 @@ namespace Nexus {
         //
         caveRegionsDirty = true;
 
+        //
+        // caves[] indices changed, so the cached mask is invalid.
+        //
+        caveRenderableDirty = true;
+
         caveMeshDirty = true;
 
         if (caveValidationIndex >= caves.size()) {
             caveValidationIndex = 0;
         }
 
-        if (caveOcclusionIndex >= caves.size()) {
-            caveOcclusionIndex = 0;
+        if (caveNearOcclusionIndex >= caves.size()) {
+            caveNearOcclusionIndex = 0;
+        }
+
+        if (caveFarOcclusionIndex >= caves.size()) {
+            caveFarOcclusionIndex = 0;
         }
     }
 
@@ -894,15 +1113,20 @@ namespace Nexus {
             caveValidationIndex = 0;
         }
 
-        if (caveOcclusionIndex >= caves.size()) {
-            caveOcclusionIndex = 0;
+        if (caveNearOcclusionIndex >= caves.size()) {
+            caveNearOcclusionIndex = 0;
+        }
+
+        if (caveFarOcclusionIndex >= caves.size()) {
+            caveFarOcclusionIndex = 0;
         }
     }
 
     void XRayScanner::validateCachedCaves(SDK::BlockSource* region) {
         if (!region || caves.empty()) {
             caveValidationIndex = 0;
-            caveOcclusionIndex = 0;
+            caveNearOcclusionIndex = 0;
+            caveFarOcclusionIndex = 0;
             return;
         }
 
@@ -940,8 +1164,28 @@ namespace Nexus {
             cave.faces = faces;
 
             cave.occludedFaces &= faces;
+            cave.pendingOccludedFaces &= faces;
+
+            for (std::uint8_t face : CaveFaceList) {
+                if ((faces & face) == 0) {
+                    cave.depthBuckets[caveFaceIndex(face)] = 0;
+                }
+            }
+
+            if (oldFaces != cave.faces) {
+                cave.pendingOccludedFaces = cave.occludedFaces;
+                cave.occlusionConfirmations = 0;
+            }
 
             if (oldFaces != cave.faces || oldOccluded != cave.occludedFaces) {
+                bool oldRenderable = oldOccluded != 0;
+
+                bool newRenderable = cave.occludedFaces != 0;
+
+                if (oldRenderable != newRenderable) {
+                    caveRenderableDirty = true;
+                }
+
                 caveMeshDirty = true;
             }
 
@@ -985,39 +1229,36 @@ namespace Nexus {
     // ================================================================
     //
 
-    bool XRayScanner::isLineOccluded(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const {
+    XRayScanner::CaveRayInfo XRayScanner::getCaveRayInfo(SDK::BlockSource* region, Vec3 const& start,
+                                                         Vec3 const& end) const {
+        CaveRayInfo info {};
+
         if (!region) {
-            return false;
+            return info;
         }
 
         float dx = end.x - start.x;
-
         float dy = end.y - start.y;
-
         float dz = end.z - start.z;
 
         float lengthSq = dx * dx + dy * dy + dz * dz;
 
         if (lengthSq <= 0.000001f) {
-            return false;
+            return info;
         }
 
+        info.targetDistance = std::sqrt(lengthSq);
+
         int x = static_cast<int>(std::floor(start.x));
-
         int y = static_cast<int>(std::floor(start.y));
-
         int z = static_cast<int>(std::floor(start.z));
 
         int endX = static_cast<int>(std::floor(end.x));
-
         int endY = static_cast<int>(std::floor(end.y));
-
         int endZ = static_cast<int>(std::floor(end.z));
 
         int stepX = dx > 0.0f ? 1 : (dx < 0.0f ? -1 : 0);
-
         int stepY = dy > 0.0f ? 1 : (dy < 0.0f ? -1 : 0);
-
         int stepZ = dz > 0.0f ? 1 : (dz < 0.0f ? -1 : 0);
 
         constexpr float infinity = std::numeric_limits<float>::infinity();
@@ -1050,6 +1291,8 @@ namespace Nexus {
 
         float tMaxZ = calculateInitialT(start.z, dz, stepZ);
 
+        bool foundFirstSolid = false;
+
         int safety = 0;
 
         while ((x != endX || y != endY || z != endZ) && safety < 512) {
@@ -1078,6 +1321,9 @@ namespace Nexus {
                 tMaxZ += tDeltaZ;
             }
 
+            //
+            // Do not count the destination cave-space cell.
+            //
             if (x == endX && y == endY && z == endZ) {
                 break;
             }
@@ -1088,12 +1334,67 @@ namespace Nexus {
 
             SDK::Block* block = region->getBlock(BlockPos { x, y, z });
 
-            if (block && !isCaveSpaceBlock(block)) {
-                return true;
+            if (!block) {
+                continue;
+            }
+
+            CaveBlockClass blockClass = classifyCaveBlockCached(block);
+
+            if (blockClass != CaveBlockClass::Solid) {
+                continue;
+            }
+
+            //
+            // Record the distance to the FIRST solid block.
+            //
+            if (!foundFirstSolid) {
+                float normalizedT = std::clamp(nextT, 0.0f, 1.0f);
+
+                info.firstSolidDistance = normalizedT * info.targetDistance;
+
+                foundFirstSolid = true;
+            }
+
+            //
+            // Count solid terrain crossed.
+            //
+            // The depth renderer saturates at 8 solid voxels:
+            //
+            // 1 block  -> level 0
+            // ...
+            // 8+ blocks -> level 7
+            //
+            // Once 8 solid blocks have been found, continuing the DDA
+            // cannot change visibility or the final depth level.
+            //
+            if (info.solidDepth < 8) {
+                ++info.solidDepth;
+            }
+
+            //
+            // We already know:
+            //
+            // - the ray is occluded
+            // - firstSolidDistance
+            // - targetDistance
+            // - maximum terrain-thickness level
+            //
+            // No additional voxel traversal can affect Cave ESP.
+            //
+            if (info.solidDepth >= 8) {
+                break;
             }
         }
 
-        return false;
+        return info;
+    }
+
+    std::uint8_t XRayScanner::getLineSolidDepth(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const {
+        return getCaveRayInfo(region, start, end).solidDepth;
+    }
+
+    bool XRayScanner::isLineOccluded(SDK::BlockSource* region, Vec3 const& start, Vec3 const& end) const {
+        return getLineSolidDepth(region, start, end) > 0;
     }
 
     //
@@ -1102,71 +1403,358 @@ namespace Nexus {
     // ================================================================
     //
 
-    void XRayScanner::updateCaveOcclusion(SDK::BlockSource* region, Vec3 const& viewOrigin) {
+        void XRayScanner::updateCaveOcclusion(SDK::BlockSource* region, Vec3 const& viewOrigin) {
         if (!region || caves.empty()) {
-            caveOcclusionIndex = 0;
+            caveNearOcclusionIndex = 0;
+            caveFarOcclusionIndex = 0;
             return;
         }
 
-        int checked = 0;
+        //
+        // ============================================================
+        // DISTANCE-PRIORITIZED RAY BUDGET
+        // ============================================================
+        //
+        // Pass 1:
+        //     nearby caves receive priority.
+        //
+        // Pass 2:
+        //     distant caves receive the remaining total budget.
+        //
+        // The caves[] vector is NOT sorted or reordered.
+        //
 
-        while (checked < CaveOcclusionCellsPerTick && !caves.empty()) {
-            if (caveOcclusionIndex >= caves.size()) {
-                caveOcclusionIndex = 0;
+        int raysUsed = 0;
+
+        float nearDistanceSq = CaveNearOcclusionDistance * CaveNearOcclusionDistance;
+
+        //
+        // ============================================================
+        // DISTANCE TEST
+        // ============================================================
+        //
+
+        auto isNearCave = [&](CaveHit const& cave) -> bool {
+            float x = static_cast<float>(cave.pos.x) + 0.5f;
+
+            float y = static_cast<float>(cave.pos.y) + 0.5f;
+
+            float z = static_cast<float>(cave.pos.z) + 0.5f;
+
+            float dx = x - viewOrigin.x;
+
+            float dy = y - viewOrigin.y;
+
+            float dz = z - viewOrigin.z;
+
+            float distanceSq = dx * dx + dy * dy + dz * dz;
+
+            return distanceSq <= nearDistanceSq;
+        };
+
+        //
+        // ============================================================
+        // PROCESS ONE COMPLETE CAVE CELL
+        // ============================================================
+        //
+        // Returns false when the cell would exceed this pass's ray
+        // budget. In that case the caller leaves its cursor on the
+        // current cell so it gets first chance next tick.
+        //
+
+        auto processCave = [&](std::size_t caveIndexValue, int rayLimit) -> bool {
+            if (caveIndexValue >= caves.size()) {
+                return true;
             }
 
-            CaveHit& cave = caves[caveOcclusionIndex];
+            CaveHit& cave = caves[caveIndexValue];
 
             //
-            // Tiny rejected regions don't need rays.
+            // ====================================================
+            // REJECTED REGION
+            // ====================================================
             //
+            // Costs no rays.
+            //
+
             if (!cave.regionVisible) {
-                if (cave.occludedFaces != 0) {
-                    cave.occludedFaces = 0;
+                bool changed = cave.occludedFaces != 0;
+
+                cave.occludedFaces = 0;
+                cave.pendingOccludedFaces = 0;
+                cave.occlusionConfirmations = 0;
+
+                for (std::uint8_t& bucket : cave.depthBuckets) {
+                    bucket = 0;
+                }
+
+                if (changed) {
+                    caveRenderableDirty = true;
                     caveMeshDirty = true;
                 }
 
-                ++caveOcclusionIndex;
-                ++checked;
-
-                continue;
+                return true;
             }
 
-            std::uint8_t oldOccluded = cave.occludedFaces;
+            //
+            // ====================================================
+            // CELL RAY COST
+            // ====================================================
+            //
 
-            Vec3 cellCenter { static_cast<float>(cave.pos.x) + 0.5f,
+            int faceRayCost = 0;
 
-                              static_cast<float>(cave.pos.y) + 0.5f,
+            for (std::uint8_t face : CaveFaceList) {
+                if ((cave.faces & face) != 0) {
+                    ++faceRayCost;
+                }
+            }
 
-                              static_cast<float>(cave.pos.z) + 0.5f };
+            //
+            // Defensive zero-face case.
+            //
+            if (faceRayCost == 0) {
+                bool changed = cave.occludedFaces != 0;
 
-            if (!isLineOccluded(region, viewOrigin, cellCenter)) {
                 cave.occludedFaces = 0;
-            } else {
-                std::uint8_t occluded = 0;
+                cave.pendingOccludedFaces = 0;
+                cave.occlusionConfirmations = 0;
+
+                for (std::uint8_t& bucket : cave.depthBuckets) {
+                    bucket = 0;
+                }
+
+                if (changed) {
+                    caveRenderableDirty = true;
+                    caveMeshDirty = true;
+                }
+
+                return true;
+            }
+
+            //
+            // Keep the cave-cell update atomic.
+            //
+            // Never trace only some faces.
+            //
+            if (raysUsed + faceRayCost > rayLimit) {
+                return false;
+            }
+
+            std::uint8_t desiredOccludedFaces = 0;
+
+            std::array<std::uint8_t, 6> desiredDepthBuckets {};
+
+            //
+            // ====================================================
+            // PER-FACE DDA
+            // ====================================================
+            //
+
+            for (std::uint8_t face : CaveFaceList) {
+                if ((cave.faces & face) == 0) {
+                    continue;
+                }
+
+                Vec3 target = getCaveFaceCenter(cave.pos, face);
+
+                CaveRayInfo rayInfo = getCaveRayInfo(region, viewOrigin, target);
+
+                ++raysUsed;
+
+                if (rayInfo.solidDepth == 0) {
+                    continue;
+                }
+
+                desiredOccludedFaces |= face;
+
+                float hiddenDistance = std::max(0.0f, rayInfo.targetDistance - rayInfo.firstSolidDistance);
+
+                std::uint8_t depthLevel =
+                    caveDepthLevel(rayInfo.solidDepth, hiddenDistance, rayInfo.firstSolidDistance);
+
+                desiredDepthBuckets[caveFaceIndex(face)] = depthLevel;
+            }
+
+            desiredOccludedFaces &= cave.faces;
+
+            bool depthChanged = false;
+
+            //
+            // ====================================================
+            // OCCLUSION HYSTERESIS
+            // ====================================================
+            //
+
+            if (desiredOccludedFaces == cave.occludedFaces) {
+                cave.pendingOccludedFaces = desiredOccludedFaces;
+
+                cave.occlusionConfirmations = 0;
 
                 for (std::uint8_t face : CaveFaceList) {
-                    if ((cave.faces & face) == 0) {
+                    std::size_t index = caveFaceIndex(face);
+
+                    std::uint8_t newBucket = 0;
+
+                    if ((desiredOccludedFaces & face) != 0) {
+                        newBucket = desiredDepthBuckets[index];
+                    }
+
+                    if (cave.depthBuckets[index] != newBucket) {
+                        cave.depthBuckets[index] = newBucket;
+
+                        depthChanged = true;
+                    }
+                }
+            }
+
+            else if (desiredOccludedFaces == cave.pendingOccludedFaces) {
+                if (cave.occlusionConfirmations < 255) {
+                    ++cave.occlusionConfirmations;
+                }
+
+                if (cave.occlusionConfirmations >= 2) {
+                    bool oldRenderable = cave.occludedFaces != 0;
+
+                    cave.occludedFaces = desiredOccludedFaces;
+
+                    cave.pendingOccludedFaces = desiredOccludedFaces;
+
+                    cave.occlusionConfirmations = 0;
+
+                    bool newRenderable = cave.occludedFaces != 0;
+
+                    if (oldRenderable != newRenderable) {
+                        caveRenderableDirty = true;
+                    }
+
+                    for (std::uint8_t face : CaveFaceList) {
+                        std::size_t index = caveFaceIndex(face);
+
+                        if ((cave.occludedFaces & face) != 0) {
+                            cave.depthBuckets[index] = desiredDepthBuckets[index];
+                        } else {
+                            cave.depthBuckets[index] = 0;
+                        }
+                    }
+
+                    caveMeshDirty = true;
+                }
+
+                else {
+                    for (std::uint8_t face : CaveFaceList) {
+                        if ((cave.occludedFaces & face) == 0) {
+                            continue;
+                        }
+
+                        if ((desiredOccludedFaces & face) == 0) {
+                            continue;
+                        }
+
+                        std::size_t index = caveFaceIndex(face);
+
+                        if (cave.depthBuckets[index] != desiredDepthBuckets[index]) {
+                            cave.depthBuckets[index] = desiredDepthBuckets[index];
+
+                            depthChanged = true;
+                        }
+                    }
+                }
+            }
+
+            else {
+                cave.pendingOccludedFaces = desiredOccludedFaces;
+
+                cave.occlusionConfirmations = 1;
+
+                for (std::uint8_t face : CaveFaceList) {
+                    if ((cave.occludedFaces & face) == 0) {
                         continue;
                     }
 
-                    Vec3 target = getCaveFaceCenter(cave.pos, face);
+                    if ((desiredOccludedFaces & face) == 0) {
+                        continue;
+                    }
 
-                    if (isLineOccluded(region, viewOrigin, target)) {
-                        occluded |= face;
+                    std::size_t index = caveFaceIndex(face);
+
+                    if (cave.depthBuckets[index] != desiredDepthBuckets[index]) {
+                        cave.depthBuckets[index] = desiredDepthBuckets[index];
+
+                        depthChanged = true;
                     }
                 }
-
-                cave.occludedFaces = occluded;
             }
 
-            if (oldOccluded != cave.occludedFaces) {
+            if (depthChanged) {
                 caveMeshDirty = true;
             }
 
-            ++caveOcclusionIndex;
-            ++checked;
-        }
+            return true;
+        };
+
+        //
+        // ============================================================
+        // GENERIC PRIORITY PASS
+        // ============================================================
+        //
+
+        auto runPass = [&](std::size_t& cursor, bool wantNear, int rayLimit) {
+            std::size_t examined = 0;
+
+            while (examined < caves.size() && raysUsed < rayLimit) {
+                if (cursor >= caves.size()) {
+                    cursor = 0;
+                }
+
+                std::size_t currentIndex = cursor;
+
+                bool currentIsNear = isNearCave(caves[currentIndex]);
+
+                //
+                // This cell belongs to the other priority band.
+                //
+                if (currentIsNear != wantNear) {
+                    ++cursor;
+                    ++examined;
+                    continue;
+                }
+
+                //
+                // The current cell would exceed the remaining
+                // budget.
+                //
+                // Leave the cursor here so it is first next tick.
+                //
+                if (!processCave(currentIndex, rayLimit)) {
+                    break;
+                }
+
+                ++cursor;
+                ++examined;
+            }
+        };
+
+        //
+        // ============================================================
+        // PASS 1 — NEAR CAVES
+        // ============================================================
+        //
+
+        runPass(caveNearOcclusionIndex, true, CaveNearOcclusionRaysPerTick);
+
+        //
+        // ============================================================
+        // PASS 2 — DISTANT CAVES
+        // ============================================================
+        //
+        // raysUsed already contains the near-pass cost.
+        //
+        // Therefore unused nearby budget automatically becomes
+        // available here.
+        //
+
+        runPass(caveFarOcclusionIndex, false, CaveOcclusionRaysPerTick);
     }
 
     //
@@ -1178,6 +1766,7 @@ namespace Nexus {
     void XRayScanner::rebuildCaveRegions() {
         if (caves.empty()) {
             caveRegionsDirty = false;
+            caveRenderableDirty = true;
             caveMeshDirty = true;
 
             return;
@@ -1281,18 +1870,192 @@ namespace Nexus {
                     cave.regionVisible = keepRegion;
 
                     //
-                    // Re-run occlusion for newly accepted regions.
+                    // Region classification changed.
+                    //
+                    // Completely reset its view-dependent state.
                     //
                     cave.occludedFaces = 0;
+                    cave.pendingOccludedFaces = 0;
+                    cave.occlusionConfirmations = 0;
+
+                    for (std::uint8_t& bucket : cave.depthBuckets) {
+                        bucket = 0;
+                    }
+
+                    //
+                    // Structural region acceptance changed.
+                    //
+                    // The cached fragment graph may therefore be stale.
+                    //
+                    caveRenderableDirty = true;
                     caveMeshDirty = true;
-                } else if (!keepRegion && cave.occludedFaces != 0) {
+
+                } else if (!keepRegion) {
+                    bool changed = cave.occludedFaces != 0;
+
                     cave.occludedFaces = 0;
-                    caveMeshDirty = true;
+                    cave.pendingOccludedFaces = 0;
+                    cave.occlusionConfirmations = 0;
+
+                    for (std::uint8_t& bucket : cave.depthBuckets) {
+                        bucket = 0;
+                    }
+
+                    if (changed) {
+                        caveRenderableDirty = true;
+                        caveMeshDirty = true;
+                    }
                 }
             }
         }
 
         caveRegionsDirty = false;
+        caveMeshDirty = true;
+    }
+
+        //
+    // ================================================================
+    // RENDERED CAVE FRAGMENT MASK
+    // ================================================================
+    //
+
+    void XRayScanner::rebuildCaveRenderableMask() {
+        caveRenderableMask.assign(caves.size(), 0);
+
+        if (caves.empty()) {
+            caveRenderableDirty = false;
+            caveMeshDirty = true;
+
+            return;
+        }
+
+        std::vector<std::uint8_t> visited(caves.size(), 0);
+
+        constexpr int neighborOffsets[6][3] = { { -1, 0, 0 }, { 1, 0, 0 },  { 0, -1, 0 },
+                                                { 0, 1, 0 },  { 0, 0, -1 }, { 0, 0, 1 } };
+
+        std::vector<std::size_t> stack;
+        std::vector<std::size_t> component;
+
+        stack.reserve(256);
+        component.reserve(256);
+
+        auto isRenderedCandidate = [&](std::size_t index) -> bool {
+            if (index >= caves.size()) {
+                return false;
+            }
+
+            CaveHit const& cave = caves[index];
+
+            return cave.regionVisible && cave.occludedFaces != 0;
+        };
+
+        //
+        // ============================================================
+        // FIND CONNECTED RENDERED FRAGMENTS
+        // ============================================================
+        //
+
+        for (std::size_t startIndex = 0; startIndex < caves.size(); ++startIndex) {
+            if (visited[startIndex]) {
+                continue;
+            }
+
+            visited[startIndex] = 1;
+
+            if (!isRenderedCandidate(startIndex)) {
+                continue;
+            }
+
+            stack.clear();
+            component.clear();
+
+            stack.push_back(startIndex);
+
+            BlockPos const& startPos = caves[startIndex].pos;
+
+            int minX = startPos.x;
+            int maxX = startPos.x;
+
+            int minY = startPos.y;
+            int maxY = startPos.y;
+
+            int minZ = startPos.z;
+            int maxZ = startPos.z;
+
+            while (!stack.empty()) {
+                std::size_t currentIndex = stack.back();
+
+                stack.pop_back();
+
+                component.push_back(currentIndex);
+
+                BlockPos const& pos = caves[currentIndex].pos;
+
+                minX = std::min(minX, pos.x);
+                maxX = std::max(maxX, pos.x);
+
+                minY = std::min(minY, pos.y);
+                maxY = std::max(maxY, pos.y);
+
+                minZ = std::min(minZ, pos.z);
+                maxZ = std::max(maxZ, pos.z);
+
+                for (auto const& offset : neighborOffsets) {
+                    BlockKey neighborKey { pos.x + offset[0], pos.y + offset[1], pos.z + offset[2] };
+
+                    auto found = caveIndex.find(neighborKey);
+
+                    if (found == caveIndex.end()) {
+                        continue;
+                    }
+
+                    std::size_t neighborIndex = found->second;
+
+                    if (neighborIndex >= caves.size()) {
+                        continue;
+                    }
+
+                    if (visited[neighborIndex]) {
+                        continue;
+                    }
+
+                    visited[neighborIndex] = 1;
+
+                    if (!isRenderedCandidate(neighborIndex)) {
+                        continue;
+                    }
+
+                    stack.push_back(neighborIndex);
+                }
+            }
+
+            int spanX = maxX - minX + 1;
+
+            int spanY = maxY - minY + 1;
+
+            int spanZ = maxZ - minZ + 1;
+
+            int longestSpan = std::max(spanX, std::max(spanY, spanZ));
+
+            bool keepFragment = component.size() >= static_cast<std::size_t>(MinimumRenderedFragmentCells) ||
+                                longestSpan >= MinimumRenderedFragmentSpan;
+
+            if (!keepFragment) {
+                continue;
+            }
+
+            for (std::size_t index : component) {
+                caveRenderableMask[index] = 1;
+            }
+        }
+
+        caveRenderableDirty = false;
+
+        //
+        // A different accepted-fragment mask means the mesh needs to
+        // reflect it.
+        //
         caveMeshDirty = true;
     }
 
@@ -1304,20 +2067,68 @@ namespace Nexus {
 
     void XRayScanner::rebuildCaveMesh() {
         caveMesh.clear();
+        caveOutlineLines.clear();
 
-        using PlaneKey = std::pair<std::uint8_t, int>;
+        if (caves.empty()) {
+            caveMeshDirty = false;
+            return;
+        }
+
+        //
+        // Safety: the cached fragment mask must correspond to caves[].
+        //
+        if (caveRenderableMask.size() != caves.size()) {
+            caveRenderableDirty = true;
+            return;
+        }
+
+        //
+        // ============================================================
+        // BUILD GREEDY-MESH INPUT PLANES
+        // ============================================================
+        //
+
+        //
+        // Fill mesh:
+        //
+        // Keep depth level in the key so differently faded surfaces
+        // remain separate.
+        //
+        using PlaneKey = std::tuple<std::uint8_t, int, std::uint8_t>;
+
+        //
+        // Outline mesh:
+        //
+        // Ignore normal depth levels when deciding whether neighboring
+        // cells can merge.
+        //
+        using OutlinePlaneKey = std::pair<std::uint8_t, int>;
 
         using Cell = std::pair<int, int>;
 
         std::map<PlaneKey, std::set<Cell>> planes;
 
         //
-        // Convert cave faces into sparse 2D plane cells.
+        // Each outline cell still remembers its depth level. That lets
+        // the resulting larger outline rectangle retain appropriate
+        // depth fading without splitting solely because its cells had
+        // slightly different levels.
         //
-        for (CaveHit const& cave : caves) {
-            if (!cave.regionVisible) {
+        std::map<OutlinePlaneKey, std::map<Cell, std::uint8_t>> outlinePlanes;
+
+        for (std::size_t index = 0; index < caves.size(); ++index) {
+            //
+            // NEW FILTER.
+            //
+            // Old code used every region-visible cave with occluded
+            // faces. Now only accepted rendered fragments reach the
+            // mesher.
+            //
+            if (!caveRenderableMask[index]) {
                 continue;
             }
+
+            CaveHit const& cave = caves[index];
 
             std::uint8_t faces = cave.occludedFaces;
 
@@ -1330,12 +2141,15 @@ namespace Nexus {
                     continue;
                 }
 
+                std::uint8_t depthBucket = cave.depthBuckets[caveFaceIndex(face)];
+
                 int plane = 0;
                 int u = 0;
                 int v = 0;
 
                 //
                 // Down
+                //
                 // Plane Y
                 // U X
                 // V Z
@@ -1344,7 +2158,6 @@ namespace Nexus {
                     plane = cave.pos.y;
 
                     u = cave.pos.x;
-
                     v = cave.pos.z;
                 }
 
@@ -1355,12 +2168,12 @@ namespace Nexus {
                     plane = cave.pos.y + 1;
 
                     u = cave.pos.x;
-
                     v = cave.pos.z;
                 }
 
                 //
                 // North
+                //
                 // Plane Z
                 // U X
                 // V Y
@@ -1369,7 +2182,6 @@ namespace Nexus {
                     plane = cave.pos.z;
 
                     u = cave.pos.x;
-
                     v = cave.pos.y;
                 }
 
@@ -1380,12 +2192,12 @@ namespace Nexus {
                     plane = cave.pos.z + 1;
 
                     u = cave.pos.x;
-
                     v = cave.pos.y;
                 }
 
                 //
                 // West
+                //
                 // Plane X
                 // U Z
                 // V Y
@@ -1394,7 +2206,6 @@ namespace Nexus {
                     plane = cave.pos.x;
 
                     u = cave.pos.z;
-
                     v = cave.pos.y;
                 }
 
@@ -1405,27 +2216,47 @@ namespace Nexus {
                     plane = cave.pos.x + 1;
 
                     u = cave.pos.z;
-
                     v = cave.pos.y;
                 }
 
-                planes[{ face, plane }].insert({ u, v });
+                //
+                // Depth-aware fill input.
+                //
+                planes[{ face, plane, depthBucket }].insert({ u, v });
+
+                //
+                // Simplified outline input.
+                //
+                // Depth does NOT participate in the plane key.
+                //
+                auto& outlineCells = outlinePlanes[{ face, plane }];
+
+                auto [outlineIt, inserted] = outlineCells.emplace(Cell { u, v }, depthBucket);
+
+                //
+                // There normally cannot be duplicate cells here, but
+                // keep the more strongly suppressed level if one ever
+                // occurs.
+                //
+                if (!inserted) {
+                    outlineIt->second = std::max(outlineIt->second, depthBucket);
+                }
             }
         }
 
         //
-        // Greedy rectangle merging.
+        // ============================================================
+        // GREEDY RECTANGLE MERGING
+        // ============================================================
         //
-        for (auto& [planeKey, cells] : planes) {
-            std::uint8_t face = planeKey.first;
 
-            int plane = planeKey.second;
+        for (auto& [planeKey, cells] : planes) {
+            auto [face, plane, depthBucket] = planeKey;
 
             while (!cells.empty()) {
                 Cell start = *cells.begin();
 
                 int startU = start.first;
-
                 int startV = start.second;
 
                 //
@@ -1464,17 +2295,150 @@ namespace Nexus {
                 //
                 for (int offsetV = 0; offsetV < height; ++offsetV) {
                     for (int offsetU = 0; offsetU < width; ++offsetU) {
-                        cells.erase({ startU + offsetU,
-
-                                      startV + offsetV });
+                        cells.erase({ startU + offsetU, startV + offsetV });
                     }
                 }
 
-                caveMesh.push_back({ face, plane, startU, startV, width, height });
+                caveMesh.push_back({ face, plane, startU, startV, width, height, depthBucket });
+            }
+        }
+
+                //
+        // ============================================================
+        // BOUNDARY-ONLY CAVE OUTLINE
+        // ============================================================
+        //
+        // A line is emitted only when a cave-face cell has no
+        // neighboring cave-face cell on that side.
+        //
+        // Internal greedy-mesh seams are therefore eliminated.
+        //
+
+        for (auto const& [planeKey, cells] : outlinePlanes) {
+            auto [face, plane] = planeKey;
+
+            //
+            // Horizontal edge:
+            //
+            // fixed V coordinate
+            // changing U coordinate
+            //
+            using HorizontalKey = std::pair<int, std::uint8_t>;
+
+            //
+            // Vertical edge:
+            //
+            // fixed U coordinate
+            // changing V coordinate
+            //
+            using VerticalKey = std::pair<int, std::uint8_t>;
+
+            std::map<HorizontalKey, std::set<int>> horizontalEdges;
+
+            std::map<VerticalKey, std::set<int>> verticalEdges;
+
+            //
+            // --------------------------------------------------------
+            // EXTRACT TRUE PERIMETER EDGES
+            // --------------------------------------------------------
+            //
+
+            for (auto const& [cell, depthLevel] : cells) {
+                int u = cell.first;
+                int v = cell.second;
+
+                //
+                // Bottom edge.
+                //
+                if (!cells.contains({ u, v - 1 })) {
+                    horizontalEdges[{ v, depthLevel }].insert(u);
+                }
+
+                //
+                // Top edge.
+                //
+                if (!cells.contains({ u, v + 1 })) {
+                    horizontalEdges[{ v + 1, depthLevel }].insert(u);
+                }
+
+                //
+                // Left edge.
+                //
+                if (!cells.contains({ u - 1, v })) {
+                    verticalEdges[{ u, depthLevel }].insert(v);
+                }
+
+                //
+                // Right edge.
+                //
+                if (!cells.contains({ u + 1, v })) {
+                    verticalEdges[{ u + 1, depthLevel }].insert(v);
+                }
+            }
+
+            //
+            // --------------------------------------------------------
+            // MERGE HORIZONTAL EDGES
+            // --------------------------------------------------------
+            //
+
+            for (auto& [edgeKey, starts] : horizontalEdges) {
+                auto [fixedV, depthLevel] = edgeKey;
+
+                while (!starts.empty()) {
+                    int startU = *starts.begin();
+
+                    int length = 1;
+
+                    while (starts.contains(startU + length)) {
+                        ++length;
+                    }
+
+                    for (int offset = 0; offset < length; ++offset) {
+                        starts.erase(startU + offset);
+                    }
+
+                    Vec3 start = getCaveOutlinePoint(face, plane, startU, fixedV);
+
+                    Vec3 end = getCaveOutlinePoint(face, plane, startU + length, fixedV);
+
+                    caveOutlineLines.push_back({ start, end, depthLevel });
+                }
+            }
+
+            //
+            // --------------------------------------------------------
+            // MERGE VERTICAL EDGES
+            // --------------------------------------------------------
+            //
+
+            for (auto& [edgeKey, starts] : verticalEdges) {
+                auto [fixedU, depthLevel] = edgeKey;
+
+                while (!starts.empty()) {
+                    int startV = *starts.begin();
+
+                    int length = 1;
+
+                    while (starts.contains(startV + length)) {
+                        ++length;
+                    }
+
+                    for (int offset = 0; offset < length; ++offset) {
+                        starts.erase(startV + offset);
+                    }
+
+                    Vec3 start = getCaveOutlinePoint(face, plane, fixedU, startV);
+
+                    Vec3 end = getCaveOutlinePoint(face, plane, fixedU, startV + length);
+
+                    caveOutlineLines.push_back({ start, end, depthLevel });
+                }
             }
         }
 
         caveMeshDirty = false;
+
     }
 
     //
@@ -1585,12 +2549,17 @@ namespace Nexus {
         if (lastAirCheck3x3x3 != xRaySettings.airCheck3x3x3 || lastIgnoreSurface != xRaySettings.ignoreSurface) {
             caves.clear();
             caveIndex.clear();
+            caveBlockClassCache.clear();
+            caveRenderableMask.clear();
             caveMesh.clear();
+            caveOutlineLines.clear();
 
             caveValidationIndex = 0;
-            caveOcclusionIndex = 0;
+            caveNearOcclusionIndex = 0;
+            caveFarOcclusionIndex = 0;
 
             caveRegionsDirty = true;
+            caveRenderableDirty = true;
             caveMeshDirty = true;
 
             caveRegionRebuildTimer = 0;
@@ -1610,15 +2579,20 @@ namespace Nexus {
 
             caves.clear();
             caveIndex.clear();
+            caveBlockClassCache.clear();
+            caveRenderableMask.clear();
             caveMesh.clear();
+            caveOutlineLines.clear();
 
             scanInitialized = false;
 
             oreValidationIndex = 0;
             caveValidationIndex = 0;
-            caveOcclusionIndex = 0;
+            caveNearOcclusionIndex = 0;
+            caveFarOcclusionIndex = 0;
 
             caveRegionsDirty = true;
+            caveRenderableDirty = true;
             caveMeshDirty = true;
 
             caveRegionRebuildTimer = 0;
@@ -1634,15 +2608,20 @@ namespace Nexus {
 
             caves.clear();
             caveIndex.clear();
+            caveBlockClassCache.clear();
+            caveRenderableMask.clear();
             caveMesh.clear();
+            caveOutlineLines.clear();
 
             scanInitialized = false;
 
             oreValidationIndex = 0;
             caveValidationIndex = 0;
-            caveOcclusionIndex = 0;
+            caveNearOcclusionIndex = 0;
+            caveFarOcclusionIndex = 0;
 
             caveRegionsDirty = true;
+            caveRenderableDirty = true;
             caveMeshDirty = true;
 
             caveRegionRebuildTimer = 0;
@@ -1658,15 +2637,20 @@ namespace Nexus {
 
             caves.clear();
             caveIndex.clear();
+            caveBlockClassCache.clear();
+            caveRenderableMask.clear();
             caveMesh.clear();
+            caveOutlineLines.clear();
 
             scanInitialized = false;
 
             oreValidationIndex = 0;
             caveValidationIndex = 0;
-            caveOcclusionIndex = 0;
+            caveNearOcclusionIndex = 0;
+            caveFarOcclusionIndex = 0;
 
             caveRegionsDirty = true;
+            caveRenderableDirty = true;
             caveMeshDirty = true;
 
             caveRegionRebuildTimer = 0;
@@ -1688,12 +2672,17 @@ namespace Nexus {
         if (!xRaySettings.caveESP) {
             caves.clear();
             caveIndex.clear();
+            caveBlockClassCache.clear();
+            caveRenderableMask.clear();
             caveMesh.clear();
+            caveOutlineLines.clear();
 
             caveValidationIndex = 0;
-            caveOcclusionIndex = 0;
+            caveNearOcclusionIndex = 0;
+            caveFarOcclusionIndex = 0;
 
             caveRegionsDirty = true;
+            caveRenderableDirty = true;
             caveMeshDirty = true;
 
             caveRegionRebuildTimer = 0;
@@ -1786,7 +2775,23 @@ namespace Nexus {
             updateCaveOcclusion(region, viewOrigin);
 
             //
-            // Greedy render mesh.
+            // ========================================================
+            // RENDERED FRAGMENT CONNECTIVITY
+            // ========================================================
+            //
+            // Only rebuilt when cave topology or visibility changes.
+            //
+            if (caveRenderableDirty) {
+                rebuildCaveRenderableMask();
+            }
+
+            //
+            // ========================================================
+            // RENDER MESH
+            // ========================================================
+            //
+            // Depth-only changes can rebuild the mesh without running
+            // the fragment flood-fill again.
             //
             if (caveMeshDirty) {
                 rebuildCaveMesh();
@@ -1807,7 +2812,7 @@ namespace Nexus {
 
         bool renderOres = xRaySettings.oreESP && !ores.empty();
 
-        bool renderCaves = xRaySettings.caveESP && !caveMesh.empty();
+        bool renderCaves = xRaySettings.caveESP && ((xRaySettings.fill && !caveMesh.empty()) || (xRaySettings.outline && !caveOutlineLines.empty()));
 
         if (!renderOres && !renderCaves) {
             return;
@@ -1930,12 +2935,59 @@ namespace Nexus {
                                             0.40f, 0.85f);
 
             //
+            // ========================================================
+            // DEPTH OPACITY
+            // ========================================================
+            //
+
+            auto depthFillMultiplier = [](std::uint8_t level) -> float {
+                //
+                // Level 8 is the special close-wall protection.
+                //
+                if (level >= 8) {
+                    return 0.05f;
+                }
+
+                //
+                // Normal levels 0-7 smoothly fade:
+                //
+                // 0 -> 1.00
+                // 7 -> 0.20
+                //
+                float t = std::clamp(static_cast<float>(level) / 7.0f, 0.0f, 1.0f);
+
+                return 1.00f - (0.80f * t);
+            };
+
+            auto depthOutlineMultiplier = [](std::uint8_t level) -> float {
+                //
+                // Level 8 keeps the successful close-wall outline
+                // suppression.
+                //
+                if (level >= 8) {
+                    return 0.08f;
+                }
+
+                //
+                // Normal levels 0-7 smoothly fade:
+                //
+                // 0 -> 1.00
+                // 7 -> 0.25
+                //
+                float t = std::clamp(static_cast<float>(level) / 7.0f, 0.0f, 1.0f);
+
+                return 1.00f - (0.75f * t);
+            };
+
+            //
             // Cave fill.
             //
             if (xRaySettings.fill) {
-                d2d::Color fillColor = caveColor.asAlpha(fillAlpha);
-
                 for (CaveMeshQuad const& quad : caveMesh) {
+                    float quadAlpha = fillAlpha * depthFillMultiplier(quad.depthBucket);
+
+                    d2d::Color fillColor = caveColor.asAlpha(quadAlpha);
+
                     drawCaveMeshFill(dc, quad.face, quad.plane, quad.u, quad.v, quad.width, quad.height, fillColor);
                 }
 
@@ -1943,14 +2995,15 @@ namespace Nexus {
             }
 
             //
-            // Cave outline.
+            // Cave boundary outline.
             //
             if (xRaySettings.outline) {
-                d2d::Color outlineColor = caveColor.asAlpha(outlineAlpha);
+                for (CaveOutlineLine const& line : caveOutlineLines) {
+                    float lineAlpha = outlineAlpha * depthOutlineMultiplier(line.depthLevel);
 
-                for (CaveMeshQuad const& quad : caveMesh) {
-                    drawCaveMeshOutline(dc, quad.face, quad.plane, quad.u, quad.v, quad.width, quad.height,
-                                        outlineColor);
+                    d2d::Color outlineColor = caveColor.asAlpha(lineAlpha);
+
+                    dc.drawLine(line.start, line.end, outlineColor);
                 }
 
                 dc.flush();
