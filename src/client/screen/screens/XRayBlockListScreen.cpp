@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -62,6 +63,61 @@ namespace {
         return result;
     }
 
+    bool isAutoOreId(std::string_view id) {
+        //
+        // Strip the namespace so this works for both:
+        //
+        // minecraft:diamond_ore
+        // some_addon:ruby_ore
+        //
+
+        std::size_t colon = id.find(':');
+
+        std::string_view path = colon == std::string_view::npos ? id : id.substr(colon + 1);
+
+        //
+        // Ancient Debris is ore-like but does not contain an "ore" token.
+        //
+
+        if (path == "ancient_debris") {
+            return true;
+        }
+
+        //
+        // Look for an actual underscore-separated "ore" token.
+        //
+        // Examples:
+        //
+        // diamond_ore
+        // deepslate_diamond_ore
+        // nether_gold_ore
+        // ruby_ore
+        //
+        // This deliberately avoids loose substring matching such as
+        // "oreberry" or unrelated names containing the letters "ore".
+        //
+
+        std::size_t start = 0;
+
+        while (start < path.size()) {
+            std::size_t end = path.find('_', start);
+
+            std::string_view token =
+                end == std::string_view::npos ? path.substr(start) : path.substr(start, end - start);
+
+            if (token == "ore") {
+                return true;
+            }
+
+            if (end == std::string_view::npos) {
+                break;
+            }
+
+            start = end + 1;
+        }
+
+        return false;
+    }
 } // namespace
 
 XRayBlockListScreen::XRayBlockListScreen() {
@@ -281,19 +337,82 @@ void XRayBlockListScreen::onRender(Event&) {
                     DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
 
+    //
+    // ============================================================
+    // SEARCH / BATCH SCOPE
+    // ============================================================
+    //
+    // Batch actions use the current search results.
+    //
+    // Selected Only is intentionally NOT included here. It is a display
+    // filter rather than a batch-selection filter. Otherwise turning on
+    // Selected Only would make "All On" unable to add anything.
+    //
+
+    std::wstring rawSearch = lowerText(searchBox.getText());
+
+    std::wstring normalizedSearch = normalizeSearchText(searchBox.getText());
+
+    auto matchesSearch = [&](const BlockEntry& entry) -> bool {
+        if (rawSearch.empty()) {
+            return true;
+        }
+
+        std::wstring nameRaw = lowerText(entry.name);
+
+        std::wstring idRaw = lowerText(entry.ids);
+
+        std::wstring nameNormalized = normalizeSearchText(entry.name);
+
+        std::wstring idNormalized = normalizeSearchText(entry.ids);
+
+        return nameRaw.find(rawSearch) != std::wstring::npos ||
+
+               idRaw.find(rawSearch) != std::wstring::npos ||
+
+               (!normalizedSearch.empty() && (nameNormalized.find(normalizedSearch) != std::wstring::npos ||
+
+                                              idNormalized.find(normalizedSearch) != std::wstring::npos));
+    };
+
+    std::vector<BlockEntry*> batchEntries;
+
+    batchEntries.reserve(entries.size());
+
+    for (auto& entry : entries) {
+        if (matchesSearch(entry)) {
+            batchEntries.push_back(&entry);
+        }
+    }
+
+    //
     // Helper buttons + layout dropdown.
+    //
+
     float helperTop = searchRect.bottom + 8.0f * scale;
     float helperHeight = 26.0f * scale;
+
     float helperGap = 7.0f * scale;
-    float helperWidth = 110.0f * scale;
+
+    float helperWidth = 95.0f * scale;
+
+    float autoOreWidth = 125.0f * scale;
+
+    float selectedOnlyWidth = 125.0f * scale;
 
     d2d::Rect allOnRect = { searchRect.left, helperTop, searchRect.left + helperWidth, helperTop + helperHeight };
+
     d2d::Rect allOffRect = { allOnRect.right + helperGap, helperTop, allOnRect.right + helperGap + helperWidth,
                              helperTop + helperHeight };
-    d2d::Rect selectedOnlyRect = { allOffRect.right + helperGap, helperTop,
-                                   allOffRect.right + helperGap + 125.0f * scale, helperTop + helperHeight };
+
+    d2d::Rect autoOresRect = { allOffRect.right + helperGap, helperTop, allOffRect.right + helperGap + autoOreWidth,
+                               helperTop + helperHeight };
+
+    d2d::Rect selectedOnlyRect = { autoOresRect.right + helperGap, helperTop,
+                                   autoOresRect.right + helperGap + selectedOnlyWidth, helperTop + helperHeight };
 
     float layoutWidth = 160.0f * scale;
+
     d2d::Rect layoutSelectorRect = { searchRect.right - layoutWidth, helperTop, searchRect.right,
                                      helperTop + helperHeight };
 
@@ -323,17 +442,59 @@ void XRayBlockListScreen::onRender(Event&) {
 
     if (drawButton(allOnRect, L"All On")) {
         bool changed = false;
-        for (const auto& entry : entries)
-            changed |= XRayTargets::setSelected(entry.namespacedId, true);
-        if (changed) NexusConfig::save();
+
+        for (BlockEntry* entry : batchEntries) {
+            if (!entry) {
+                continue;
+            }
+
+            changed |= XRayTargets::setSelected(entry->namespacedId, true);
+        }
+
+        if (changed) {
+            NexusConfig::save();
+        }
+
         playClickSound();
     }
 
     if (drawButton(allOffRect, L"All Off")) {
         bool changed = false;
-        for (const auto& entry : entries)
-            changed |= XRayTargets::setSelected(entry.namespacedId, false);
-        if (changed) NexusConfig::save();
+
+        for (BlockEntry* entry : batchEntries) {
+            if (!entry) {
+                continue;
+            }
+
+            changed |= XRayTargets::setSelected(entry->namespacedId, false);
+        }
+
+        if (changed) {
+            NexusConfig::save();
+        }
+
+        playClickSound();
+    }
+
+    if (drawButton(autoOresRect, L"Auto Add Ores")) {
+        bool changed = false;
+
+        for (BlockEntry* entry : batchEntries) {
+            if (!entry) {
+                continue;
+            }
+
+            if (!isAutoOreId(entry->namespacedId)) {
+                continue;
+            }
+
+            changed |= XRayTargets::setSelected(entry->namespacedId, true);
+        }
+
+        if (changed) {
+            NexusConfig::save();
+        }
+
         playClickSound();
     }
 
@@ -408,32 +569,28 @@ void XRayBlockListScreen::onRender(Event&) {
         }
     }
 
-    // Filter.
-    std::wstring rawSearch = lowerText(searchBox.getText());
-    std::wstring normalizedSearch = normalizeSearchText(searchBox.getText());
+    //
+    // ============================================================
+    // DISPLAY FILTER
+    // ============================================================
+    //
 
     std::vector<BlockEntry*> visibleEntries;
+
     visibleEntries.reserve(entries.size());
 
     for (auto& entry : entries) {
-        bool selected = XRayTargets::isSelected(entry.namespacedId);
-        if (selectedOnly && !selected) continue;
-
-        if (rawSearch.empty()) {
-            visibleEntries.push_back(&entry);
+        if (!matchesSearch(entry)) {
             continue;
         }
 
-        std::wstring nameRaw = lowerText(entry.name);
-        std::wstring idRaw = lowerText(entry.ids);
-        std::wstring nameNormalized = normalizeSearchText(entry.name);
-        std::wstring idNormalized = normalizeSearchText(entry.ids);
+        bool selected = XRayTargets::isSelected(entry.namespacedId);
 
-        bool matches = nameRaw.find(rawSearch) != std::wstring::npos || idRaw.find(rawSearch) != std::wstring::npos ||
-                       (!normalizedSearch.empty() && (nameNormalized.find(normalizedSearch) != std::wstring::npos ||
-                                                      idNormalized.find(normalizedSearch) != std::wstring::npos));
+        if (selectedOnly && !selected) {
+            continue;
+        }
 
-        if (matches) visibleEntries.push_back(&entry);
+        visibleEntries.push_back(&entry);
     }
 
     // List/grid.
