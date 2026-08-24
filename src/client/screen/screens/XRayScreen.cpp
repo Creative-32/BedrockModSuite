@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -38,6 +39,12 @@ void XRayScreen::onEnable(bool) {
     targetScroll = 0.0f;
     targetLerpScroll = 0.0f;
     targetScrollMax = 0.0f;
+
+    targetScrollbarDragging = false;
+    targetScrollbarDragOffset = 0.0f;
+
+    activeSliderId.clear();
+    sliderDirty = false;
 
     targetDragPending = false;
     draggingTarget = false;
@@ -71,6 +78,15 @@ void XRayScreen::onDisable() {
     draggingTargetWasExpanded = false;
 
     draggingTargetId.clear();
+
+    draggingTargetOriginalIndex = 0;
+    dragTargetIndex = 0;
+
+    targetScrollbarDragging = false;
+    targetScrollbarDragOffset = 0.0f;
+
+    activeSliderId.clear();
+    sliderDirty = false;
 
     targetHoverAnim.clear();
 
@@ -137,6 +153,27 @@ void XRayScreen::onRender(Event&) {
     //
 
     float scale = std::clamp(screenSize.width / 1920.0f, 0.72f, 1.10f);
+
+    //
+    // ============================================================
+    // FINISH SLIDER / SCROLLBAR DRAGS
+    // ============================================================
+    //
+
+    if (!mouseButtons[0]) {
+        //
+        // Save slider changes once when the mouse is released instead
+        // of writing the config every render frame.
+        //
+        if (sliderDirty) {
+            NexusConfig::save();
+            sliderDirty = false;
+        }
+
+        activeSliderId.clear();
+
+        targetScrollbarDragging = false;
+    }
 
     //
     // A normal click opens/closes settings.
@@ -341,21 +378,61 @@ void XRayScreen::onRender(Event&) {
         return changed;
     };
 
-    auto drawSlider = [&](const d2d::Rect& rowRect, const std::wstring& label, int& value, int minimum, int maximum,
-                          int step, bool percent, bool enabled = true) {
-        d2d::Rect interactionRect = { rowRect.left + 150.0f * scale, rowRect.top, rowRect.right - 72.0f * scale,
-                                      rowRect.bottom };
+    auto drawSlider = [&](std::string_view sliderId, const d2d::Rect& rowRect, const std::wstring& label, int& value,
+                          int minimum, int maximum, int step, bool percent, bool enabled = true) {
+        //
+        // Bigger than the visual slider.
+        //
+        // The most important increase is vertical. You no longer
+        // need to put the mouse directly on the narrow track.
+        //
+        d2d::Rect interactionRect = { rowRect.left + 108.0f * scale, rowRect.top - 6.0f * scale,
+
+                                      rowRect.right - 28.0f * scale, rowRect.bottom + 6.0f * scale };
 
         bool hovering = enabled && shouldSelect(interactionRect, cursorPos);
 
-        if (hovering) {
+        //
+        // Mouse-down captures this particular slider.
+        //
+        if (enabled && hovering && justClicked[0]) {
+            activeSliderId.assign(sliderId);
+        }
+
+        bool draggingThis = enabled && mouseButtons[0] && activeSliderId == sliderId;
+
+        if (hovering || draggingThis) {
             cursor = Cursor::Hand;
         }
 
-        Nexus::UI::drawSlider(dc, rowRect, label, value, minimum, maximum, step, percent, hovering,
-                              enabled && justClicked[0], enabled && mouseButtons[0], cursorPos.x, scale);
+        int oldValue = value;
+
+        //
+        // While captured we intentionally pass hovering=true too.
+        //
+        // This allows NexusControls' existing slider code to keep
+        // responding even if the cursor drifts vertically away from
+        // the visible track.
+        //
+        Nexus::UI::drawSlider(dc, rowRect, label, value, minimum, maximum, step, percent,
+
+                              hovering || draggingThis,
+
+                              enabled && hovering && justClicked[0],
+
+                              draggingThis,
+
+                              cursorPos.x, scale);
+
+        if (value != oldValue) {
+            sliderDirty = true;
+        }
 
         if (!enabled) {
+            if (activeSliderId == sliderId) {
+                activeSliderId.clear();
+            }
+
             drawDisabledOverlay(rowRect);
         }
     };
@@ -403,55 +480,104 @@ void XRayScreen::onRender(Event&) {
     // Compact slider for expanded target settings.
     //
 
-    auto drawMiniSlider = [&](const d2d::Rect& rect, const std::wstring& label, int& value, int minimum, int maximum,
-                              bool enabled) {
-        d2d::Rect labelRect = { rect.left + 8.0f * scale, rect.top, rect.left + 42.0f * scale, rect.bottom };
+    auto drawMiniSlider = [&](std::string_view sliderId, const d2d::Rect& rect, const std::wstring& label, int& value,
+                              int minimum, int maximum, bool enabled) {
+        d2d::Rect labelRect = { rect.left + 8.0f * scale, rect.top,
 
-        d2d::Rect valueRect = { rect.right - 34.0f * scale, rect.top, rect.right - 5.0f * scale, rect.bottom };
+                                rect.left + 42.0f * scale, rect.bottom };
 
-        d2d::Rect trackRect = { rect.left + 48.0f * scale,
+        d2d::Rect valueRect = { rect.right - 34.0f * scale, rect.top,
 
-                                rect.center().y - 2.0f * scale,
+                                rect.right - 5.0f * scale, rect.bottom };
 
-                                rect.right - 42.0f * scale,
+        //
+        // Thicker visual track.
+        //
+        d2d::Rect trackRect = { rect.left + 48.0f * scale, rect.center().y - 3.0f * scale,
 
-                                rect.center().y + 2.0f * scale };
+                                rect.right - 42.0f * scale, rect.center().y + 3.0f * scale };
 
-        dc.drawText(labelRect, label, enabled ? d2d::Color::RGB(0xC0, 0xC0, 0xC0) : d2d::Color::RGB(0x60, 0x60, 0x60),
-                    Renderer::FontSelection::PrimaryRegular, 10.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
-                    DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        //
+        // Large invisible grab region.
+        //
+        d2d::Rect interactionRect = { trackRect.left - 10.0f * scale, rect.top - 4.0f * scale,
 
-        dc.drawText(valueRect, std::to_wstring(value), enabled ? d2d::Colors::WHITE : d2d::Color::RGB(0x60, 0x60, 0x60),
-                    Renderer::FontSelection::PrimaryRegular, 9.0f * scale, DWRITE_TEXT_ALIGNMENT_TRAILING,
-                    DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                                      trackRect.right + 10.0f * scale, rect.bottom + 4.0f * scale };
 
-        dc.fillRoundedRectangle(trackRect, d2d::Color::RGB(0x38, 0x38, 0x38), 2.0f * scale);
+        bool hovering = enabled && shouldSelect(interactionRect, cursorPos);
+
+        if (enabled && hovering && justClicked[0]) {
+            activeSliderId.assign(sliderId);
+        }
+
+        bool draggingThis = enabled && mouseButtons[0] && activeSliderId == sliderId;
+
+        if (hovering || draggingThis) {
+            cursor = Cursor::Hand;
+        }
+
+        dc.drawText(labelRect, label,
+
+                    enabled ? d2d::Color::RGB(0xC0, 0xC0, 0xC0) : d2d::Color::RGB(0x60, 0x60, 0x60),
+
+                    Renderer::FontSelection::PrimaryRegular, 10.0f * scale,
+
+                    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        dc.drawText(valueRect, std::to_wstring(value),
+
+                    enabled ? d2d::Colors::WHITE : d2d::Color::RGB(0x60, 0x60, 0x60),
+
+                    Renderer::FontSelection::PrimaryRegular, 9.0f * scale,
+
+                    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        dc.fillRoundedRectangle(trackRect, d2d::Color::RGB(0x38, 0x38, 0x38), 3.0f * scale);
 
         float normalized = static_cast<float>(value - minimum) / static_cast<float>(maximum - minimum);
 
         normalized = std::clamp(normalized, 0.0f, 1.0f);
 
-        d2d::Rect progressRect = { trackRect.left, trackRect.top, trackRect.left + trackRect.getWidth() * normalized,
+        d2d::Rect progressRect = { trackRect.left, trackRect.top,
+
+                                   trackRect.left + trackRect.getWidth() * normalized,
+
                                    trackRect.bottom };
 
-        dc.fillRoundedRectangle(progressRect, d2d::Color::RGB(0x42, 0x78, 0xA8), 2.0f * scale);
+        dc.fillRoundedRectangle(progressRect, d2d::Color::RGB(0x42, 0x78, 0xA8), 3.0f * scale);
 
         float knobX = trackRect.left + trackRect.getWidth() * normalized;
 
-        float knobRadius = 4.0f * scale;
+        //
+        // 13 px-ish diameter at normal scale.
+        //
+        float knobRadius = 6.5f * scale;
 
-        d2d::Rect knobRect = { knobX - knobRadius, rect.center().y - knobRadius, knobX + knobRadius,
-                               rect.center().y + knobRadius };
+        d2d::Rect knobRect = { knobX - knobRadius, rect.center().y - knobRadius,
 
-        dc.fillRoundedRectangle(knobRect, d2d::Colors::WHITE, knobRadius);
+                               knobX + knobRadius, rect.center().y + knobRadius };
 
-        bool hovering = enabled && shouldSelect(trackRect, cursorPos);
+        dc.fillRoundedRectangle(knobRect,
 
-        if (hovering) {
-            cursor = Cursor::Hand;
+                                hovering || draggingThis ? d2d::Color::RGB(0xF4, 0xF4, 0xF4) : d2d::Colors::WHITE,
+
+                                knobRadius);
+
+        if (!enabled) {
+            if (activeSliderId == sliderId) {
+                activeSliderId.clear();
+            }
+
+            return;
         }
 
-        if (!hovering || (!justClicked[0] && !mouseButtons[0])) {
+        //
+        // Start immediately on click and continue anywhere on the
+        // horizontal axis until the mouse is released.
+        //
+        bool manipulating = draggingThis || (hovering && justClicked[0]);
+
+        if (!manipulating) {
             return;
         }
 
@@ -462,7 +588,12 @@ void XRayScreen::onRender(Event&) {
         int newValue = static_cast<int>(
             std::lround(static_cast<float>(minimum) + mouseNormalized * static_cast<float>(maximum - minimum)));
 
-        value = std::clamp(newValue, minimum, maximum);
+        newValue = std::clamp(newValue, minimum, maximum);
+
+        if (newValue != value) {
+            value = newValue;
+            sliderDirty = true;
+        }
     };
 
     //
@@ -819,7 +950,7 @@ void XRayScreen::onRender(Event&) {
 
     float expansionHeight = 106.0f * scale;
 
-    float scrollbarSpace = 10.0f * scale;
+    float scrollbarSpace = 24.0f * scale;
 
     //
     // Consistent inner spacing around the target grid.
@@ -890,8 +1021,18 @@ void XRayScreen::onRender(Event&) {
 
     targetScroll = std::clamp(targetScroll, 0.0f, targetScrollMax);
 
-    targetLerpScroll =
-        std::lerp(targetLerpScroll, targetScroll, std::clamp(Latite::getRenderer().getDeltaTime() / 5.0f, 0.0f, 1.0f));
+    if (targetScrollbarDragging) {
+        //
+        // A directly dragged scrollbar should follow the mouse exactly.
+        //
+        targetLerpScroll = targetScroll;
+    }
+
+    else {
+        targetLerpScroll = std::lerp(targetLerpScroll, targetScroll,
+
+                                     std::clamp(Latite::getRenderer().getDeltaTime() / 5.0f, 0.0f, 1.0f));
+    }
 
     targetLerpScroll = std::clamp(targetLerpScroll, 0.0f, targetScrollMax);
 
@@ -1232,16 +1373,19 @@ void XRayScreen::onRender(Event&) {
                 d2d::Rect blueRect = { greenRect.left, greenRect.bottom, greenRect.right,
                                        greenRect.bottom + miniHeight };
 
-                drawMiniSlider(redRect, L"R", color.r, 0, 255, oresAvailable);
+                drawMiniSlider(target->id + ".color.r", redRect, L"R", color.r, 0, 255, oresAvailable);
 
-                drawMiniSlider(greenRect, L"G", color.g, 0, 255, oresAvailable);
+                drawMiniSlider(target->id + ".color.g", greenRect, L"G", color.g, 0, 255, oresAvailable);
 
-                drawMiniSlider(blueRect, L"B", color.b, 0, 255, oresAvailable);
+                drawMiniSlider(target->id + ".color.b", blueRect, L"B", color.b, 0, 255, oresAvailable);
 
                 if (color.r != originalColor.r || color.g != originalColor.g || color.b != originalColor.b) {
                     setTargetColor(*target, color);
 
-                    NexusConfig::save();
+                    //
+                    // drawMiniSlider already marked sliderDirty.
+                    // Config gets saved once when the mouse is released.
+                    //
                 }
             }
         }
@@ -1317,33 +1461,145 @@ void XRayScreen::onRender(Event&) {
     //
 
     if (targetScrollMax > 0.0f) {
-        float trackWidth = 4.0f * scale;
+        float trackWidth = 7.0f * scale;
 
-        d2d::Rect trackRect = { targetViewport.right - 7.0f * scale,
+        d2d::Rect trackRect = { targetViewport.right - 13.0f * scale,
 
-                                targetViewport.top + 5.0f * scale,
+                                targetViewport.top + 6.0f * scale,
 
-                                targetViewport.right - 3.0f * scale,
+                                targetViewport.right - 6.0f * scale,
 
-                                targetViewport.bottom - 5.0f * scale };
+                                targetViewport.bottom - 6.0f * scale };
 
-        dc.fillRoundedRectangle(trackRect, d2d::Color::RGB(0x2D, 0x2D, 0x2D), trackWidth * 0.5f);
+        float visibleRatio = targetViewport.getHeight() / std::max(contentHeight, 1.0f);
 
-        float visibleRatio = targetViewport.getHeight() / contentHeight;
+        float thumbHeight = std::max(32.0f * scale,
 
-        float thumbHeight = std::max(28.0f * scale, trackRect.getHeight() * visibleRatio);
+                                     trackRect.getHeight() * visibleRatio);
 
         thumbHeight = std::min(thumbHeight, trackRect.getHeight());
 
-        float availableTrack = trackRect.getHeight() - thumbHeight;
+        float availableTrack = std::max(0.0f,
+
+                                        trackRect.getHeight() - thumbHeight);
 
         float scrollPercent = targetScrollMax > 0.0f ? targetLerpScroll / targetScrollMax : 0.0f;
 
+        scrollPercent = std::clamp(scrollPercent, 0.0f, 1.0f);
+
         float thumbTop = trackRect.top + availableTrack * scrollPercent;
 
-        d2d::Rect thumbRect = { trackRect.left, thumbTop, trackRect.right, thumbTop + thumbHeight };
+        d2d::Rect thumbRect = { trackRect.left, thumbTop,
 
-        dc.fillRoundedRectangle(thumbRect, d2d::Color::RGB(0x72, 0x72, 0x72), trackWidth * 0.5f);
+                                trackRect.right, thumbTop + thumbHeight };
+
+        //
+        // The visual bar stays compact, but this entire right-side
+        // strip can grab it.
+        //
+        d2d::Rect scrollbarHitRect = { targetViewport.right - 24.0f * scale,
+
+                                       targetViewport.top,
+
+                                       targetViewport.right,
+
+                                       targetViewport.bottom };
+
+        d2d::Rect thumbHitRect = { scrollbarHitRect.left,
+
+                                   thumbRect.top - 5.0f * scale,
+
+                                   scrollbarHitRect.right,
+
+                                   thumbRect.bottom + 5.0f * scale };
+
+        bool overScrollbar = !draggingTarget && shouldSelect(scrollbarHitRect, cursorPos);
+
+        bool overThumb = !draggingTarget && shouldSelect(thumbHitRect, cursorPos);
+
+        if (overScrollbar || targetScrollbarDragging) {
+            cursor = Cursor::Hand;
+        }
+
+        //
+        // --------------------------------------------------------
+        // START DRAG / TRACK CLICK
+        // --------------------------------------------------------
+        //
+
+        if (overScrollbar && justClicked[0]) {
+            targetScrollbarDragging = true;
+
+            //
+            // Prevent this mouse press from becoming a target-card drag.
+            //
+            targetDragPending = false;
+
+            if (overThumb) {
+                //
+                // Preserve the exact spot where the thumb was grabbed.
+                //
+                targetScrollbarDragOffset = cursorPos.y - thumbTop;
+            }
+
+            else {
+                //
+                // Clicking anywhere on the track jumps toward the click.
+                //
+                targetScrollbarDragOffset = thumbHeight * 0.5f;
+
+                float wantedTop = cursorPos.y - targetScrollbarDragOffset;
+
+                float percent = availableTrack > 0.0f ? (wantedTop - trackRect.top) / availableTrack : 0.0f;
+
+                percent = std::clamp(percent, 0.0f, 1.0f);
+
+                targetScroll = percent * targetScrollMax;
+
+                targetLerpScroll = targetScroll;
+            }
+        }
+
+        //
+        // --------------------------------------------------------
+        // ACTIVE DRAG
+        // --------------------------------------------------------
+        //
+
+        if (targetScrollbarDragging && mouseButtons[0]) {
+            float wantedTop = cursorPos.y - targetScrollbarDragOffset;
+
+            float percent = availableTrack > 0.0f ? (wantedTop - trackRect.top) / availableTrack : 0.0f;
+
+            percent = std::clamp(percent, 0.0f, 1.0f);
+
+            targetScroll = percent * targetScrollMax;
+
+            targetLerpScroll = targetScroll;
+        }
+
+        //
+        // --------------------------------------------------------
+        // DRAW
+        // --------------------------------------------------------
+        //
+
+        dc.fillRoundedRectangle(trackRect,
+
+                                overScrollbar ? d2d::Color::RGB(0x3A, 0x3A, 0x3A) : d2d::Color::RGB(0x2D, 0x2D, 0x2D),
+
+                                trackWidth * 0.5f);
+
+        dc.fillRoundedRectangle(thumbRect,
+
+                                overThumb || targetScrollbarDragging ? d2d::Color::RGB(0xA0, 0xA0, 0xA0)
+                                                                     : d2d::Color::RGB(0x72, 0x72, 0x72),
+
+                                trackWidth * 0.5f);
+    }
+
+    else {
+        targetScrollbarDragging = false;
     }
 
     //
@@ -1368,11 +1624,13 @@ void XRayScreen::onRender(Event&) {
         return rect;
     };
 
-    drawSlider(nextOreAppearanceRow(), L"Range", xRaySettings.oreRange, 16, 128, 8, false, oresAvailable);
+    drawSlider("ore.range", nextOreAppearanceRow(), L"Range", xRaySettings.oreRange, 16, 128, 8, false, oresAvailable);
 
-    drawSlider(nextOreAppearanceRow(), L"Opacity", xRaySettings.oreOpacity, 5, 100, 5, true, oresAvailable);
+    drawSlider("ore.opacity", nextOreAppearanceRow(), L"Opacity", xRaySettings.oreOpacity, 5, 100, 5, true,
+               oresAvailable);
 
-    drawSlider(nextOreAppearanceRow(), L"Brightness", xRaySettings.oreBrightness, 10, 150, 5, true, oresAvailable);
+    drawSlider("ore.brightness", nextOreAppearanceRow(), L"Brightness", xRaySettings.oreBrightness, 10, 150, 5, true,
+               oresAvailable);
 
     drawToggle(nextOreAppearanceRow(), L"Outline", xRaySettings.oreOutline, oresAvailable);
 
@@ -1428,13 +1686,15 @@ void XRayScreen::onRender(Event&) {
 
     rightY = appearanceHeader.bottom + 3.0f * scale;
 
-    drawSlider(nextRightRow(), L"Range", xRaySettings.scanRange, 16, 128, 8, false, cavesAvailable);
+    drawSlider("cave.range", nextRightRow(), L"Range", xRaySettings.scanRange, 16, 128, 8, false, cavesAvailable);
 
-    drawSlider(nextRightRow(), L"Opacity", xRaySettings.caveOpacity, 5, 100, 5, true, cavesAvailable);
+    drawSlider("cave.opacity", nextRightRow(), L"Opacity", xRaySettings.caveOpacity, 5, 100, 5, true, cavesAvailable);
 
-    drawSlider(nextRightRow(), L"Brightness", xRaySettings.caveBrightness, 10, 150, 5, true, cavesAvailable);
+    drawSlider("cave.brightness", nextRightRow(), L"Brightness", xRaySettings.caveBrightness, 10, 150, 5, true,
+               cavesAvailable);
 
-    drawSlider(nextRightRow(), L"Outline Opacity", xRaySettings.caveOutlineOpacity, 5, 100, 5, true, cavesAvailable);
+    drawSlider("cave.outlineOpacity", nextRightRow(), L"Outline Opacity", xRaySettings.caveOutlineOpacity, 5, 100, 5,
+               true, cavesAvailable);
 
     rightY += 6.0f * scale;
 
@@ -1444,11 +1704,11 @@ void XRayScreen::onRender(Event&) {
 
     rightY = colorHeader.bottom + 3.0f * scale;
 
-    drawSlider(nextRightRow(), L"Red", xRaySettings.caveColorR, 0, 255, 1, false, cavesAvailable);
+    drawSlider("cave.color.r", nextRightRow(), L"Red", xRaySettings.caveColorR, 0, 255, 1, false, cavesAvailable);
 
-    drawSlider(nextRightRow(), L"Green", xRaySettings.caveColorG, 0, 255, 1, false, cavesAvailable);
+    drawSlider("cave.color.g", nextRightRow(), L"Green", xRaySettings.caveColorG, 0, 255, 1, false, cavesAvailable);
 
-    drawSlider(nextRightRow(), L"Blue", xRaySettings.caveColorB, 0, 255, 1, false, cavesAvailable);
+    drawSlider("cave.color.b", nextRightRow(), L"Blue", xRaySettings.caveColorB, 0, 255, 1, false, cavesAvailable);
 
     rightY += 6.0f * scale;
 

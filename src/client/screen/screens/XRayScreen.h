@@ -37,6 +37,28 @@ private:
     float targetViewportBottom = 0.0f;
 
     //
+    // Draggable target scrollbar.
+    //
+
+    bool targetScrollbarDragging = false;
+    float targetScrollbarDragOffset = 0.0f;
+
+    //
+    // ============================================================
+    // SLIDER INTERACTION
+    // ============================================================
+    //
+
+    std::string activeSliderId {};
+
+    //
+    // Slider changes are written once the drag finishes instead
+    // of saving the config every rendered frame.
+    //
+
+    bool sliderDirty = false;
+
+    //
     // ============================================================
     // TARGET EXPANSION
     // ============================================================
@@ -52,7 +74,7 @@ private:
     // Quick click:
     //     expand / collapse
     //
-    // Hold:
+    // Hold / movement:
     //     begin dragging
     //
     // Switch is excluded.

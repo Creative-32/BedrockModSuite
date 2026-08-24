@@ -293,7 +293,10 @@ namespace Nexus {
     }
 
     void XRayScanner::initialize() {
+        XRayBlockCatalog::initialize();
+
         instance();
+
         XRayCustomESP::initialize();
     }
 
