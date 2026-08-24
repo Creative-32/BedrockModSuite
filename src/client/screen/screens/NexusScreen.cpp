@@ -162,7 +162,7 @@ void NexusScreen::onKey(Event& event) {
     }
 
     int pressedKey = keyEvent.getKey();
-    
+
     //
     // ESC clears search and stops typing.
     //
@@ -738,7 +738,7 @@ void NexusScreen::onRender(Event&) {
 
     lerpScroll = std::clamp(lerpScroll, 0.0f, scrollMax);
 
-//
+    //
     // ============================================================
     // FAVORITE CLICK / HOLD / DRAG
     // ============================================================
@@ -892,7 +892,8 @@ void NexusScreen::onRender(Event&) {
 
     dc.ctx->PushAxisAlignedClip(listRect.get(), D2D1_ANTIALIAS_MODE_ALIASED);
 
-auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int column, int row, float sectionTop, std::size_t favoriteIndex) {
+    auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int column, int row, float sectionTop,
+                          std::size_t favoriteIndex) {
         bool isDraggingThis = favorite && draggingFavorite && draggingFavoriteId == module.id;
 
         float targetLeft = listRect.left + static_cast<float>(column) * (tileWidth + tileGap);
@@ -967,9 +968,35 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
 
         hoverAnim = std::lerp(hoverAnim, hoverTarget, hoverBlend);
 
-        int tileShade = static_cast<int>(std::lround(0x17 + hoverAnim * 0x10));
+        if (favorite) {
+            //
+            // Favorites get a subtle blue-tinted card instead of
+            // using the exact same gray as normal modules.
+            //
 
-        dc.fillRoundedRectangle(tileRect, d2d::Color::RGB(tileShade, tileShade, tileShade), 10.0f * scale);
+            int red = static_cast<int>(std::lround(0x16 + hoverAnim * 0x08));
+
+            int green = static_cast<int>(std::lround(0x1C + hoverAnim * 0x0B));
+
+            int blue = static_cast<int>(std::lround(0x24 + hoverAnim * 0x10));
+
+            dc.fillRoundedRectangle(tileRect, d2d::Color::RGB(red, green, blue), 10.0f * scale);
+
+            //
+            // Small favorite accent strip.
+            //
+
+            d2d::Rect favoriteAccent = { tileRect.left + 2.0f * scale, tileRect.top + 8.0f * scale,
+                                         tileRect.left + 5.0f * scale, tileRect.bottom - 8.0f * scale };
+
+            dc.fillRoundedRectangle(favoriteAccent, d2d::Color::RGB(0x62, 0x92, 0xBC).asAlpha(0.85f), 1.5f * scale);
+        }
+
+        else {
+            int tileShade = static_cast<int>(std::lround(0x17 + hoverAnim * 0x10));
+
+            dc.fillRoundedRectangle(tileRect, d2d::Color::RGB(tileShade, tileShade, tileShade), 10.0f * scale);
+        }
 
         //
         // Outer soft bloom.
@@ -991,11 +1018,16 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
                                     10.0f * scale, 1.5f * scale);
         }
 
-        dc.drawRoundedRectangle(tileRect, d2d::Color::RGB(0x48, 0x48, 0x48).asAlpha(0.65f), 10.0f * scale,
-                                1.0f * scale);
+        dc.drawRoundedRectangle(tileRect,
+                                favorite ? d2d::Color::RGB(0x42, 0x78, 0xA8).asAlpha(0.60f)
+                                         : d2d::Color::RGB(0x48, 0x48, 0x48).asAlpha(0.65f),
+                                10.0f * scale, 1.0f * scale);
 
         if (favorite && draggingFavorite && favoriteIndex == dragTargetIndex) {
-            dc.drawRoundedRectangle(tileRect, d2d::Color::RGB(0x42, 0x78, 0xA8), 10.0f * scale, 2.0f * scale);
+            dc.drawRoundedRectangle(tileRect,
+                                    favorite ? d2d::Color::RGB(0x42, 0x78, 0xA8).asAlpha(0.60f)
+                                                : d2d::Color::RGB(0x48, 0x48, 0x48).asAlpha(0.65f),
+                                    10.0f * scale, 1.0f * scale);
         }
 
         //
@@ -1026,7 +1058,7 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
         }
 
         dc.drawText(starRect, favorite ? L"\u2605" : L"\u2606",
-                    favorite ? d2d::Colors::WHITE : d2d::Color::RGB(0x88, 0x88, 0x88),
+                    favorite ? d2d::Color::RGB(0x78, 0xB5, 0xE8) : d2d::Color::RGB(0x88, 0x88, 0x88),
                     Renderer::FontSelection::PrimaryRegular, 20.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER,
                     DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
@@ -1090,7 +1122,7 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
                         9.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
 
-//
+        //
         // ========================================================
         // CARD BODY
         // ========================================================
@@ -1182,7 +1214,7 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
 
         drawModule(*normalModules[i], false, column, row, normalTop, 0);
     }
-    
+
     //
     // FLOATING DRAGGED FAVORITE
     //

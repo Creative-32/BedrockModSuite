@@ -245,6 +245,8 @@ namespace Nexus {
 
         bool isCaveSpaceBlock(SDK::Block* block) const;
 
+        bool isUndergroundForCaveESP(SDK::BlockSource* region, BlockPos const& pos) const;
+
         bool passesAirCheck(SDK::BlockSource* region, BlockPos const& pos) const;
 
         bool hasRoofAbove(SDK::BlockSource* region, BlockPos const& pos) const;
@@ -413,10 +415,21 @@ namespace Nexus {
         // Separate round-robin cursors for nearby and distant cave
         // occlusion updates.
         //
+
         std::size_t caveNearOcclusionIndex = 0;
         std::size_t caveFarOcclusionIndex = 0;
 
+        //
+        // Shared incremental scanner state.
+        //
+
         bool scanInitialized = false;
+
+        //
+        // Cave ESP underground gate.
+        //
+
+        bool caveUndergroundActive = false;
 
         //
         // Cave filter setting state.

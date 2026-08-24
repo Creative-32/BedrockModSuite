@@ -4,6 +4,7 @@
 #include "xray/XRaySettings.h"
 
 #include "module/NexusModuleRegistry.h"
+#include "xray/XRayTargets.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -239,6 +240,79 @@ namespace Nexus {
                 }
 
                 //
+                // ====================================================
+                // CUSTOM TARGETS
+                // ====================================================
+                //
+
+                xRaySettings.customTargets.clear();
+
+                    if (xray.contains("customTargets") && xray["customTargets"].is_array()) {
+                        for (const auto& item : xray["customTargets"]) {
+                            if (!item.is_object()) {
+                                continue;
+                            }
+
+                            std::string blockId = item.value("id", std::string {});
+
+                            if (blockId.empty() || blockId.find(':') == std::string::npos) {
+                                continue;
+                            }
+
+                            //
+                            // Built-in ore IDs continue to use the grouped
+                            // Diamond/Emerald/etc. settings.
+                            //
+                            if (XRayTargets::isBuiltInBlockId(blockId)) {
+                                continue;
+                            }
+
+                            bool duplicate =
+                                std::any_of(xRaySettings.customTargets.begin(), xRaySettings.customTargets.end(),
+                                            [&](const XRayCustomTarget& target) {
+                                                return target.blockId == blockId;
+                                            });
+
+                            if (duplicate) {
+                                continue;
+                            }
+
+                            XRayCustomTarget target;
+
+                            target.blockId = blockId;
+                            target.enabled = item.value("enabled", true);
+
+                            if (item.contains("color") && item["color"].is_object()) {
+                                const auto& color = item["color"];
+
+                                target.color.r = std::clamp(color.value("r", target.color.r), 0, 255);
+
+                                target.color.g = std::clamp(color.value("g", target.color.g), 0, 255);
+
+                                target.color.b = std::clamp(color.value("b", target.color.b), 0, 255);
+                            }
+
+                            xRaySettings.customTargets.push_back(std::move(target));
+                        }
+                    }
+
+                    //
+                    // Make sure every custom target exists in the visual order.
+                    //
+
+                    for (const auto& target : xRaySettings.customTargets) {
+                        std::string key = XRayTargets::makeOrderKey(target.blockId);
+
+                        if (std::find(xRayTargetOrder.begin(), xRayTargetOrder.end(), key) == xRayTargetOrder.end()) {
+                            xRayTargetOrder.push_back(std::move(key));
+                        }
+                    }
+
+                    XRayTargets::markChanged();
+
+                    sanitizeXRayTargetOrder();
+
+                //
                 // CAVE
                 //
 
@@ -299,12 +373,21 @@ namespace Nexus {
                 xRaySettings.caveColorB = std::clamp(xRaySettings.caveColorB, 0, 255);
             }
 
-            else {
+                // Ensure every persisted custom target has a stable target-order key.
+                for (const auto& target : xRaySettings.customTargets) {
+                    const std::string key = XRayTargets::makeOrderKey(target.blockId);
+
+                    if (std::find(xRayTargetOrder.begin(), xRayTargetOrder.end(), key) == xRayTargetOrder.end()) {
+                        xRayTargetOrder.push_back(key);
+                    }
+                }
+
+                XRayTargets::markChanged();
+
                 sanitizeXRayTargetOrder();
             }
-        }
 
-        catch (...) {
+            catch (...) {
             menuKey = 'N';
 
             viewMode = NexusViewMode::List;
@@ -316,6 +399,8 @@ namespace Nexus {
             xRayTargetOrder = defaultXRayTargetOrder();
 
             xRaySettings = XRaySettings {};
+
+            XRayTargets::markChanged();
 
             save();
         }
@@ -332,7 +417,7 @@ namespace Nexus {
 
         nlohmann::json json;
 
-        json["version"] = 4;
+        json["version"] = 5;
 
         json["menuKey"] = menuKey;
 
@@ -416,6 +501,21 @@ namespace Nexus {
                          { "caveOutline", xRaySettings.caveOutline },
 
                          { "caveFill", xRaySettings.caveFill } };
+
+        json["xray"]["customTargets"] = nlohmann::json::array();
+
+        for (const auto& target : xRaySettings.customTargets) {
+            if (target.blockId.empty()) {
+                continue;
+            }
+
+            json["xray"]["customTargets"].push_back({ { "id", target.blockId },
+                                                      { "enabled", target.enabled },
+                                                      { "color",
+                                                        { { "r", std::clamp(target.color.r, 0, 255) },
+                                                          { "g", std::clamp(target.color.g, 0, 255) },
+                                                          { "b", std::clamp(target.color.b, 0, 255) } } } });
+        }
 
         //
         // Individual target colors.
@@ -506,6 +606,25 @@ namespace Nexus {
         save();
     }
 
+    void NexusConfig::ensureXRayTargetOrderEntry(const std::string& targetId) {
+        load();
+
+        if (targetId.empty()) {
+            return;
+        }
+
+        if (std::find(xRayTargetOrder.begin(), xRayTargetOrder.end(), targetId) == xRayTargetOrder.end()) {
+            xRayTargetOrder.push_back(targetId);
+        }
+    }
+
+    
+void NexusConfig::removeXRayTargetOrderEntry(const std::string& targetId) {
+        load();
+
+        std::erase(xRayTargetOrder, targetId);
+    }
+
     const std::vector<std::string>& NexusConfig::getFavoriteOrder() {
         load();
 
@@ -571,23 +690,43 @@ namespace Nexus {
 
         xRayTargetOrder = defaultXRayTargetOrder();
 
+        for (const auto& target : xRaySettings.customTargets) {
+            xRayTargetOrder.push_back(XRayTargets::makeOrderKey(target.blockId));
+        }
+
         save();
     }
 
     void NexusConfig::sanitizeXRayTargetOrder() {
         std::vector<std::string> cleaned;
 
+        cleaned.reserve(xRayTargetOrder.size() + defaultXRayTargetOrder().size() + xRaySettings.customTargets.size());
+
         //
-        // Unknown IDs are intentionally kept.
-        //
-        // That means custom/modded targets can use this same
-        // ordering format later.
+        // Preserve valid existing order.
         //
 
         for (const auto& id : xRayTargetOrder) {
             if (id.empty()) {
                 continue;
             }
+
+            //
+            // Custom target keys are only valid while the corresponding
+            // exact block target still exists.
+            //
+
+            if (XRayTargets::isCustomOrderKey(id)) {
+                std::string blockId = XRayTargets::blockIdFromOrderKey(id);
+
+                if (blockId.empty() || XRayTargets::findCustomConst(blockId) == nullptr) {
+                    continue;
+                }
+            }
+
+            //
+            // Remove duplicates.
+            //
 
             if (std::find(cleaned.begin(), cleaned.end(), id) != cleaned.end()) {
                 continue;
@@ -597,12 +736,28 @@ namespace Nexus {
         }
 
         //
-        // Restore any missing built-ins.
+        // Restore any missing built-in targets.
         //
 
         for (const auto& id : defaultXRayTargetOrder()) {
             if (std::find(cleaned.begin(), cleaned.end(), id) == cleaned.end()) {
                 cleaned.push_back(id);
+            }
+        }
+
+        //
+        // Restore any missing custom targets.
+        //
+
+        for (const auto& target : xRaySettings.customTargets) {
+            if (target.blockId.empty()) {
+                continue;
+            }
+
+            std::string key = XRayTargets::makeOrderKey(target.blockId);
+
+            if (std::find(cleaned.begin(), cleaned.end(), key) == cleaned.end()) {
+                cleaned.push_back(std::move(key));
             }
         }
 

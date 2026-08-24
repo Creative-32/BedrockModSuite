@@ -2,14 +2,10 @@
 
 #include <array>
 #include <cstddef>
+#include <string>
+#include <vector>
 
 namespace Nexus {
-
-    //
-    // ============================================================
-    // BUILT-IN X-RAY TARGETS
-    // ============================================================
-    //
 
     enum class XRayBuiltInTarget {
         Diamond,
@@ -21,7 +17,6 @@ namespace Nexus {
         Redstone,
         Lapis,
         Coal,
-
         Count
     };
 
@@ -33,55 +28,37 @@ namespace Nexus {
         int b = 255;
     };
 
-    struct XRaySettings {
-        //
-        // ========================================================
-        // MASTER
-        // ========================================================
-        //
+    struct XRayCustomTarget {
+        // Exact runtime namespaced block ID, e.g. minecraft:clay or addon:my_ore.
+        std::string blockId;
 
+        // Block List membership and main target enable state are intentionally
+        // separate concepts. Presence in customTargets means the block was added;
+        // enabled controls whether it currently renders.
         bool enabled = true;
 
-        //
-        // ========================================================
-        // ORE / BLOCK ESP
-        // ========================================================
-        //
+        XRayColor color { 255, 255, 255 };
+    };
 
+    struct XRaySettings {
+        bool enabled = true;
         bool oreESP = true;
 
         bool diamond = true;
         bool ancientDebris = true;
         bool emerald = true;
         bool gold = true;
-
         bool iron = false;
         bool copper = false;
         bool coal = false;
-
         bool lapis = true;
         bool redstone = true;
-
-        //
-        // ========================================================
-        // GLOBAL ORE APPEARANCE
-        // ========================================================
-        //
 
         int oreRange = 64;
         int oreOpacity = 80;
         int oreBrightness = 100;
-
         bool oreOutline = true;
         bool oreFill = true;
-
-        //
-        // ========================================================
-        // INDIVIDUAL TARGET COLORS
-        // ========================================================
-        //
-        // Order MUST match XRayBuiltInTarget.
-        //
 
         std::array<XRayColor, XRayBuiltInTargetCount> oreColors {
             XRayColor { 0x42, 0xE6, 0xD5 }, // Diamond
@@ -95,37 +72,19 @@ namespace Nexus {
             XRayColor { 0x70, 0x70, 0x70 }  // Coal
         };
 
-        //
-        // ========================================================
-        // CAVE ESP
-        // ========================================================
-        //
+        // Arbitrary exact block IDs selected through Block List.
+        std::vector<XRayCustomTarget> customTargets {};
 
         bool caveESP = true;
-
         bool airCheck3x3x3 = true;
         bool ignoreSurface = true;
-
-        //
-        // Cave scan range.
-        //
-
         int scanRange = 64;
-
-        //
-        // ========================================================
-        // CAVE APPEARANCE
-        // ========================================================
-        //
-
         int caveOpacity = 25;
         int caveBrightness = 80;
         int caveOutlineOpacity = 70;
-
         int caveColorR = 0xA9;
         int caveColorG = 0x5C;
         int caveColorB = 0xFF;
-
         bool caveOutline = true;
         bool caveFill = true;
     };

@@ -8,6 +8,7 @@
 #include "client/feature/nexus/NexusConfig.h"
 #include "client/feature/nexus/xray/XRaySettings.h"
 #include "client/feature/nexus/navigation/NexusNavigation.h"
+#include "client/feature/nexus/xray/XRayTargets.h"
 
 #include "client/event/Eventing.h"
 #include "client/event/events/ClickEvent.h"
@@ -157,13 +158,31 @@ void XRayScreen::onRender(Event&) {
     if (targetDragPending && !draggingTarget && mouseButtons[0]) {
         auto heldFor = std::chrono::steady_clock::now() - targetPressTime;
 
-        if (heldFor >= TargetDragHoldDelay) {
-            draggingTarget = true;
+        float moveX = cursorPos.x - dragPressX;
 
-            //
-            // Temporarily collapse an expanded card while it is being
-            // moved. We restore it after the drop.
-            //
+        float moveY = cursorPos.y - dragPressY;
+
+        float dragMovementThreshold = 6.0f * scale;
+
+        bool movedEnough = moveX * moveX + moveY * moveY >= dragMovementThreshold * dragMovementThreshold;
+
+        bool heldLongEnough = heldFor >= TargetDragHoldDelay;
+
+        //
+        // Drag starts either when:
+        //
+        // 1. The card has been intentionally held.
+        //
+        // OR
+        //
+        // 2. The mouse is clearly being dragged.
+        //
+        // This prevents quick clicks from becoming drags while also
+        // making actual mouse-dragging responsive again.
+        //
+
+        if (heldLongEnough || movedEnough) {
+            draggingTarget = true;
 
             draggingTargetWasExpanded = expandedTargetId == draggingTargetId;
 
@@ -324,12 +343,7 @@ void XRayScreen::onRender(Event&) {
 
     auto drawSlider = [&](const d2d::Rect& rowRect, const std::wstring& label, int& value, int minimum, int maximum,
                           int step, bool percent, bool enabled = true) {
-        d2d::Rect interactionRect = { rowRect.left + 150.0f * scale,
-
-                                      rowRect.top,
-
-                                      rowRect.right - 72.0f * scale,
-
+        d2d::Rect interactionRect = { rowRect.left + 150.0f * scale, rowRect.top, rowRect.right - 72.0f * scale,
                                       rowRect.bottom };
 
         bool hovering = enabled && shouldSelect(interactionRect, cursorPos);
@@ -520,29 +534,93 @@ void XRayScreen::onRender(Event&) {
         std::string id;
         std::wstring name;
 
-        bool* enabled = nullptr;
+        bool* builtInEnabled = nullptr;
+        XRayColor* builtInColor = nullptr;
 
-        XRayBuiltInTarget colorTarget = XRayBuiltInTarget::Diamond;
+        std::string customBlockId;
+        bool custom = false;
     };
 
     std::vector<TargetBinding> bindings {
-        { "diamond", L"Diamond", &xRaySettings.diamond, XRayBuiltInTarget::Diamond },
+        { "diamond", L"Diamond", &xRaySettings.diamond,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::Diamond)], "", false },
 
-        { "emerald", L"Emerald", &xRaySettings.emerald, XRayBuiltInTarget::Emerald },
+        { "emerald", L"Emerald", &xRaySettings.emerald,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::Emerald)], "", false },
 
-        { "ancient_debris", L"Ancient Debris", &xRaySettings.ancientDebris, XRayBuiltInTarget::AncientDebris },
+        { "ancient_debris", L"Ancient Debris", &xRaySettings.ancientDebris,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::AncientDebris)], "", false },
 
-        { "gold", L"Gold", &xRaySettings.gold, XRayBuiltInTarget::Gold },
+        { "gold", L"Gold", &xRaySettings.gold,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::Gold)], "", false },
 
-        { "iron", L"Iron", &xRaySettings.iron, XRayBuiltInTarget::Iron },
+        { "iron", L"Iron", &xRaySettings.iron,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::Iron)], "", false },
 
-        { "copper", L"Copper", &xRaySettings.copper, XRayBuiltInTarget::Copper },
+        { "copper", L"Copper", &xRaySettings.copper,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::Copper)], "", false },
 
-        { "redstone", L"Redstone", &xRaySettings.redstone, XRayBuiltInTarget::Redstone },
+        { "redstone", L"Redstone", &xRaySettings.redstone,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::Redstone)], "", false },
 
-        { "lapis", L"Lapis", &xRaySettings.lapis, XRayBuiltInTarget::Lapis },
+        { "lapis", L"Lapis", &xRaySettings.lapis,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::Lapis)], "", false },
 
-        { "coal", L"Coal", &xRaySettings.coal, XRayBuiltInTarget::Coal }
+        { "coal", L"Coal", &xRaySettings.coal,
+          &xRaySettings.oreColors[static_cast<std::size_t>(XRayBuiltInTarget::Coal)], "", false }
+    };
+
+    //
+    // Add persistent custom exact-ID targets.
+    //
+
+    for (const auto& custom : xRaySettings.customTargets) {
+        bindings.push_back({ XRayTargets::makeOrderKey(custom.blockId), XRayTargets::makeDisplayName(custom.blockId),
+                             nullptr, nullptr, custom.blockId, true });
+    }
+
+    auto targetEnabled = [&](const TargetBinding& target) -> bool {
+        if (target.custom) {
+            return XRayTargets::isCustomEnabled(target.customBlockId);
+        }
+
+        return target.builtInEnabled != nullptr && *target.builtInEnabled;
+    };
+
+    auto setTargetEnabled = [&](const TargetBinding& target, bool enabled) {
+        if (target.custom) {
+            XRayTargets::setCustomEnabled(target.customBlockId, enabled);
+            return;
+        }
+
+        if (target.builtInEnabled != nullptr) {
+            *target.builtInEnabled = enabled;
+            XRayTargets::markChanged();
+        }
+    };
+
+    auto targetColor = [&](const TargetBinding& target) -> XRayColor {
+        if (target.custom) {
+            return XRayTargets::getColorForBlock(target.customBlockId);
+        }
+
+        return target.builtInColor != nullptr ? *target.builtInColor : XRayColor { 255, 255, 255 };
+    };
+
+    auto setTargetColor = [&](const TargetBinding& target, XRayColor color) {
+        color.r = std::clamp(color.r, 0, 255);
+        color.g = std::clamp(color.g, 0, 255);
+        color.b = std::clamp(color.b, 0, 255);
+
+        if (target.custom) {
+            XRayTargets::setColorForBlock(target.customBlockId, color);
+            return;
+        }
+
+        if (target.builtInColor != nullptr) {
+            *target.builtInColor = color;
+            XRayTargets::markChanged();
+        }
     };
 
     auto findBinding = [&](const std::string& id) -> TargetBinding* {
@@ -567,6 +645,17 @@ void XRayScreen::onRender(Event&) {
         }
     }
 
+    for (auto& target : bindings) {
+        bool alreadyAdded =
+            std::any_of(orderedTargets.begin(), orderedTargets.end(), [&](const TargetBinding* existing) {
+                return existing != nullptr && existing->id == target.id;
+            });
+
+        if (!alreadyAdded) {
+            orderedTargets.push_back(&target);
+        }
+    }
+
     //
     // ============================================================
     // TARGET CARD HEADER
@@ -583,7 +672,7 @@ void XRayScreen::onRender(Event&) {
     int enabledTargetCount = 0;
 
     for (TargetBinding* target : orderedTargets) {
-        if (target != nullptr && target->enabled != nullptr && *target->enabled) {
+        if (target != nullptr && targetEnabled(*target)) {
             ++enabledTargetCount;
         }
     }
@@ -639,26 +728,26 @@ void XRayScreen::onRender(Event&) {
 
     if (drawSmallButton(allOnRect, L"All On", oresAvailable)) {
         for (TargetBinding* target : orderedTargets) {
-            if (target != nullptr && target->enabled != nullptr) {
-                *target->enabled = true;
+            if (target != nullptr) {
+                setTargetEnabled(*target, true);
             }
         }
 
-        playClickSound();
-
         NexusConfig::save();
+
+        playClickSound();
     }
 
-    if (drawSmallButton(allOffRect, L"All Off", oresAvailable)) {
+        if (drawSmallButton(allOffRect, L"All Off", oresAvailable)) {
         for (TargetBinding* target : orderedTargets) {
-            if (target != nullptr && target->enabled != nullptr) {
-                *target->enabled = false;
+            if (target != nullptr) {
+                setTargetEnabled(*target, false);
             }
         }
 
-        playClickSound();
-
         NexusConfig::save();
+
+        playClickSound();
     }
 
     if (drawSmallButton(collapseRect, L"Collapse", !expandedTargetId.empty())) {
@@ -893,7 +982,7 @@ void XRayScreen::onRender(Event&) {
     for (std::size_t index = 0; index < orderedTargets.size(); ++index) {
         TargetBinding* target = orderedTargets[index];
 
-        if (target == nullptr || target->enabled == nullptr) {
+        if (target == nullptr) {
             continue;
         }
 
@@ -1007,11 +1096,15 @@ void XRayScreen::onRender(Event&) {
             cursor = Cursor::Hand;
         }
 
-        if (Nexus::UI::drawSwitch(dc, switchRect, *target->enabled, switchHovered, oresAvailable && justClicked[0],
+        bool enabledValue = targetEnabled(*target);
+
+        if (Nexus::UI::drawSwitch(dc, switchRect, enabledValue, switchHovered, oresAvailable && justClicked[0],
                                   scale)) {
-            playClickSound();
+            setTargetEnabled(*target, enabledValue);
 
             NexusConfig::save();
+
+            playClickSound();
         }
 
         //
@@ -1091,9 +1184,9 @@ void XRayScreen::onRender(Event&) {
                 dc.drawRoundedRectangle(expandedRect, d2d::Color::RGB(0x42, 0x78, 0xA8).asAlpha(0.65f), 8.0f * scale,
                                         1.5f * scale);
 
-                std::size_t colorIndex = static_cast<std::size_t>(target->colorTarget);
+                XRayColor color = targetColor(*target);
 
-                XRayColor& color = xRaySettings.oreColors[colorIndex];
+                XRayColor originalColor = color;
 
                 //
                 // Color preview.
@@ -1144,6 +1237,12 @@ void XRayScreen::onRender(Event&) {
                 drawMiniSlider(greenRect, L"G", color.g, 0, 255, oresAvailable);
 
                 drawMiniSlider(blueRect, L"B", color.b, 0, 255, oresAvailable);
+
+                if (color.r != originalColor.r || color.g != originalColor.g || color.b != originalColor.b) {
+                    setTargetColor(*target, color);
+
+                    NexusConfig::save();
+                }
             }
         }
     }
@@ -1203,7 +1302,7 @@ void XRayScreen::onRender(Event&) {
             dc.drawText(floatingName, dragged->name, d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
                         12.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
-            bool drawOnlyValue = *dragged->enabled;
+            bool drawOnlyValue = targetEnabled(*dragged);
 
             Nexus::UI::drawSwitch(dc, floatingSwitch, drawOnlyValue, false, false, scale);
         }

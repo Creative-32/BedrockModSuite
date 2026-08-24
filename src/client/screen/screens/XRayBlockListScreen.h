@@ -17,7 +17,6 @@ protected:
 
 private:
     void onRender(Event& event);
-
     void onClick(Event& event);
     void onChar(Event& event);
     void onKey(Event& event);
@@ -32,11 +31,6 @@ private:
     float listBottom = 0.0f;
 
     bool selectedOnly = false;
-
-    //
-    // Layout dropdown.
-    //
-
     bool layoutDropdownOpen = false;
 
     TextBox searchBox {};

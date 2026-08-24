@@ -3,6 +3,7 @@
 
 #include "XRaySettings.h"
 #include "XRayBlockCatalog.h"
+#include "XRayCustomESP.h"
 
 #include "client/event/Eventing.h"
 #include "client/event/events/RenderLevelEvent.h"
@@ -293,6 +294,7 @@ namespace Nexus {
 
     void XRayScanner::initialize() {
         instance();
+        XRayCustomESP::initialize();
     }
 
     XRayScanner::XRayScanner() {
@@ -504,6 +506,9 @@ namespace Nexus {
             SDK::Block* block = region->getBlock(pos);
 
             if (!block) {
+                ++oreValidationIndex;
+                ++checked;
+
                 continue;
             }
 
@@ -1051,6 +1056,139 @@ namespace Nexus {
         }
 
         return false;
+    }
+
+    //
+    // ================================================================
+    // UNDERGROUND PLAYER CHECK
+    // ================================================================
+    //
+    // Cave ESP should not display while the player is standing out
+    // on the surface.
+    //
+    // We sample the player's column plus four neighboring columns.
+    //
+    // A column counts as covered when at least two structural blocks
+    // exist within 12 blocks overhead.
+    //
+    // Requiring several covered columns prevents a single overhanging
+    // block or tree canopy from turning Cave ESP on.
+    //
+
+    bool XRayScanner::isUndergroundForCaveESP(SDK::BlockSource* region, BlockPos const& pos) const {
+        if (!region) {
+            return false;
+        }
+
+        //
+        // ============================================================
+        // UNDERGROUND / SKY-EXPOSURE CHECK
+        // ============================================================
+        //
+        // Do NOT decide underground state based on how close the cave
+        // ceiling is to the player.
+        //
+        // A tall cavern may have its ceiling 30, 50, or even more blocks
+        // above the player while the player is still clearly underground.
+        //
+        // Instead, search upward through the world and determine whether
+        // the player's column is actually covered by terrain.
+        //
+        // We also sample four neighboring columns to make the result more
+        // stable near cave mouths and terrain edges.
+        //
+
+        constexpr int columnOffsets[5][2] = { { 0, 0 }, { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+
+        constexpr int worldTop = 320;
+
+        //
+        // Requiring two consecutive structural blocks prevents a
+        // one-block overhang or miscellaneous isolated block from
+        // classifying the player as underground.
+        //
+
+        constexpr int requiredConsecutiveSolids = 2;
+
+        //
+        // Center + at least two neighboring columns must be covered.
+        //
+
+        constexpr int requiredCoveredColumns = 3;
+
+        int coveredColumns = 0;
+
+        bool centerCovered = false;
+
+        for (int columnIndex = 0; columnIndex < 5; ++columnIndex) {
+            const auto& offset = columnOffsets[columnIndex];
+
+            int consecutiveSolidBlocks = 0;
+
+            bool columnCovered = false;
+
+            for (int checkY = pos.y + 1; checkY <= worldTop; ++checkY) {
+                BlockPos checkPos { pos.x + offset[0], checkY, pos.z + offset[1] };
+
+                SDK::Block* block = region->getBlock(checkPos);
+
+                if (!block || !block->legacyBlock) {
+                    consecutiveSolidBlocks = 0;
+                    continue;
+                }
+
+                std::string id = block->legacyBlock->namespacedId.getString();
+
+                //
+                // Tree canopy should never count as underground terrain.
+                //
+
+                if (id.find("leaves") != std::string::npos) {
+                    consecutiveSolidBlocks = 0;
+                    continue;
+                }
+
+                CaveBlockClass blockClass = classifyCaveBlockCached(block);
+
+                if (blockClass != CaveBlockClass::Solid) {
+                    consecutiveSolidBlocks = 0;
+                    continue;
+                }
+
+                ++consecutiveSolidBlocks;
+
+                if (consecutiveSolidBlocks >= requiredConsecutiveSolids) {
+                    columnCovered = true;
+                    break;
+                }
+            }
+
+            if (columnCovered) {
+                ++coveredColumns;
+
+                if (columnIndex == 0) {
+                    centerCovered = true;
+                }
+            }
+
+            //
+            // The first column is directly above the player.
+            //
+            // If it reaches the sky without finding terrain, the player
+            // is vertically exposed to the surface and Cave ESP should
+            // remain disabled.
+            //
+
+            if (columnIndex == 0 && !centerCovered) {
+                return false;
+            }
+
+            if (centerCovered && coveredColumns >= requiredCoveredColumns) {
+                return true;
+            }
+        }
+
+        return centerCovered && coveredColumns >= requiredCoveredColumns;
     }
 
     //
@@ -2668,7 +2806,7 @@ namespace Nexus {
 
         long long caveRangeSq = static_cast<long long>(caveRange) * static_cast<long long>(caveRange);
 
-        int blockBudget = xRaySettings.caveESP ? BlocksPerTickWithCaves : BlocksPerTickOreOnly;
+        int blockBudget = caveUndergroundActive ? BlocksPerTickWithCaves : BlocksPerTickOreOnly;
 
         int scanned = 0;
 
@@ -2716,10 +2854,16 @@ namespace Nexus {
                 continue;
             }
 
+            XRayBlockCatalog::observe(block);
+
             //
             // Ore ESP
             //
             if (xRaySettings.oreESP && distanceSq <= oreRangeSq) {
+                // Arbitrary selected exact block IDs use an isolated render/cache path.
+                XRayCustomESP::observeBlock(pos, block);
+
+                // Existing built-in Ore ESP remains untouched.
                 auto oreType = classifyOre(block);
 
                 if (oreType.has_value()) {
@@ -2730,7 +2874,7 @@ namespace Nexus {
             //
             // Cave ESP
             //
-            if (xRaySettings.caveESP && distanceSq <= caveRangeSq && isCaveSpaceBlock(block)) {
+            if (xRaySettings.caveESP && caveUndergroundActive && distanceSq <= caveRangeSq && isCaveSpaceBlock(block)) {
                 if (!isCaveAirCandidate(region, pos)) {
                     continue;
                 }
@@ -2785,6 +2929,8 @@ namespace Nexus {
         // No world.
         //
         if (!tick.getLevel()) {
+            caveUndergroundActive = false;
+
             ores.clear();
             oreMesh.clear();
             oreOutlineLines.clear();
@@ -2817,6 +2963,8 @@ namespace Nexus {
         // X-Ray disabled.
         //
         if (!xRaySettings.enabled) {
+            caveUndergroundActive = false;
+
             ores.clear();
             oreMesh.clear();
             oreOutlineLines.clear();
@@ -2849,6 +2997,8 @@ namespace Nexus {
         // Nothing enabled.
         //
         if (!xRaySettings.oreESP && !xRaySettings.caveESP) {
+            caveUndergroundActive = false;
+
             ores.clear();
             oreMesh.clear();
             oreOutlineLines.clear();
@@ -2996,6 +3146,12 @@ namespace Nexus {
 
                           static_cast<int>(std::floor(playerPos.z)) };
 
+        //
+        // Cave ESP only becomes active when the player is underground.
+        //
+
+        caveUndergroundActive = xRaySettings.caveESP && isUndergroundForCaveESP(region, center);
+
         int oreRange = std::clamp(xRaySettings.oreRange, 16, 128);
 
         int caveRange = std::clamp(xRaySettings.scanRange, 16, 128);
@@ -3027,7 +3183,7 @@ namespace Nexus {
             range = std::max(range, oreRange);
         }
 
-        if (xRaySettings.caveESP) {
+        if (xRaySettings.caveESP && caveUndergroundActive) {
             range = std::max(range, caveRange);
         }
 
@@ -3059,7 +3215,7 @@ namespace Nexus {
             validateCachedOres(region);
         }
 
-        if (xRaySettings.caveESP) {
+        if (xRaySettings.caveESP && caveUndergroundActive) {
             validateCachedCaves(region);
         }
 
@@ -3079,7 +3235,7 @@ namespace Nexus {
         //
         // Cave post-processing.
         //
-        if (xRaySettings.caveESP) {
+        if (xRaySettings.caveESP && caveUndergroundActive) {
             //
             // Connected region filtering.
             //
@@ -3137,8 +3293,9 @@ namespace Nexus {
         bool renderOres = xRaySettings.oreESP && ((xRaySettings.oreFill && !oreMesh.empty()) ||
                                                   (xRaySettings.oreOutline && !oreOutlineLines.empty()));
 
-        bool renderCaves = xRaySettings.caveESP && ((xRaySettings.caveFill && !caveMesh.empty()) ||
-                                                    (xRaySettings.caveOutline && !caveOutlineLines.empty()));
+        bool renderCaves =
+            xRaySettings.caveESP && caveUndergroundActive &&
+            ((xRaySettings.caveFill && !caveMesh.empty()) || (xRaySettings.caveOutline && !caveOutlineLines.empty()));
 
         if (!renderOres && !renderCaves) {
             return;
