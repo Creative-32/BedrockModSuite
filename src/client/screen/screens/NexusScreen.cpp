@@ -22,6 +22,7 @@
 #include "util/DrawContext.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include <cwctype>
@@ -44,16 +45,29 @@ NexusScreen::NexusScreen() {
 
 void NexusScreen::onEnable(bool ignoreAnimations) {
     openAnim = ignoreAnimations ? 1.0f : 0.0f;
+
     skipCloseAnimation = false;
 
+    favoriteDragPending = false;
     draggingFavorite = false;
+
     draggingFavoriteId.clear();
+
+    draggingFavoriteOriginalIndex = 0;
     dragTargetIndex = 0;
+
+    favoritePressTime = {};
+
+    favoritePressX = 0.0f;
+    favoritePressY = 0.0f;
+
     dragOffsetX = 0.0f;
     dragOffsetY = 0.0f;
 
     favoriteAnimX.clear();
     favoriteAnimY.clear();
+
+    moduleHoverAnim.clear();
 
     searchBox.setSelected(false);
 
@@ -63,14 +77,26 @@ void NexusScreen::onEnable(bool ignoreAnimations) {
 void NexusScreen::onDisable() {
     resetInputState();
 
+    favoriteDragPending = false;
     draggingFavorite = false;
+
     draggingFavoriteId.clear();
+
+    draggingFavoriteOriginalIndex = 0;
     dragTargetIndex = 0;
+
+    favoritePressTime = {};
+
+    favoritePressX = 0.0f;
+    favoritePressY = 0.0f;
+
     dragOffsetX = 0.0f;
     dragOffsetY = 0.0f;
 
     favoriteAnimX.clear();
     favoriteAnimY.clear();
+
+    moduleHoverAnim.clear();
 
     searchBox.setSelected(false);
 
@@ -573,52 +599,133 @@ void NexusScreen::onRender(Event&) {
 
     lerpScroll = std::clamp(lerpScroll, 0.0f, scrollMax);
 
-    //
-    // FAVORITE DRAG TARGET
+//
+    // ============================================================
+    // FAVORITE CLICK / HOLD / DRAG
+    // ============================================================
     //
 
-    if (draggingFavorite) {
+    bool openXRay = false;
+
+    constexpr auto FavoriteDragHoldDelay = std::chrono::milliseconds(230);
+
+    //
+    // ------------------------------------------------------------
+    // PENDING CARD PRESS -> DRAG
+    // ------------------------------------------------------------
+    //
+
+    if (favoriteDragPending && !draggingFavorite && mouseButtons[0]) {
+        auto heldFor = std::chrono::steady_clock::now() - favoritePressTime;
+
+        if (heldFor >= FavoriteDragHoldDelay) {
+            draggingFavorite = true;
+        }
+    }
+
+    //
+    // ------------------------------------------------------------
+    // ACTIVE DRAG
+    // ------------------------------------------------------------
+    //
+
+    if (draggingFavorite && mouseButtons[0]) {
         if (favoriteModules.empty()) {
+            favoriteDragPending = false;
             draggingFavorite = false;
+
             draggingFavoriteId.clear();
+
+            draggingFavoriteOriginalIndex = 0;
             dragTargetIndex = 0;
+
             favoriteAnimX.clear();
             favoriteAnimY.clear();
-        } else if (mouseButtons[0]) {
-            if (listRect.contains(cursorPos)) {
-                float localX = cursorPos.x - listRect.left;
+        }
 
-                float localY = cursorPos.y + lerpScroll - listRect.top;
+        else if (listRect.contains(cursorPos)) {
+            float localX = cursorPos.x - listRect.left;
 
-                int targetColumn = static_cast<int>(localX / (tileWidth + tileGap));
+            float localY = cursorPos.y + lerpScroll - listRect.top;
 
-                int targetRow = static_cast<int>(localY / (tileHeight + tileGap));
+            int targetColumn = static_cast<int>(localX / (tileWidth + tileGap));
 
-                targetColumn = std::clamp(targetColumn, 0, columnCount - 1);
+            int targetRow = static_cast<int>(localY / (tileHeight + tileGap));
 
-                targetRow = std::max(targetRow, 0);
+            targetColumn = std::clamp(targetColumn, 0, columnCount - 1);
 
-                std::size_t targetIndex = static_cast<std::size_t>(targetRow * columnCount + targetColumn);
+            targetRow = std::max(targetRow, 0);
 
-                dragTargetIndex = std::min(targetIndex, favoriteModules.size() - 1);
-            }
-        } else {
-            auto current = std::find(favoriteOrder.begin(), favoriteOrder.end(), draggingFavoriteId);
+            std::size_t targetIndex = static_cast<std::size_t>(targetRow * columnCount + targetColumn);
+
+            dragTargetIndex = std::min(targetIndex, favoriteModules.size() - 1);
+        }
+    }
+
+    //
+    // ------------------------------------------------------------
+    // RELEASE
+    // ------------------------------------------------------------
+    //
+
+    if ((favoriteDragPending || draggingFavorite) && !mouseButtons[0]) {
+        std::string releasedModuleId = draggingFavoriteId;
+
+        bool wasDragging = draggingFavorite;
+
+        //
+        // --------------------------------------------------------
+        // DROP
+        // --------------------------------------------------------
+        //
+
+        if (wasDragging && !releasedModuleId.empty()) {
+            auto current = std::find(favoriteOrder.begin(), favoriteOrder.end(), releasedModuleId);
 
             if (current != favoriteOrder.end()) {
                 std::size_t currentIndex = static_cast<std::size_t>(current - favoriteOrder.begin());
 
                 if (currentIndex != dragTargetIndex) {
-                    Nexus::NexusConfig::moveFavorite(draggingFavoriteId, dragTargetIndex);
+                    Nexus::NexusConfig::moveFavorite(releasedModuleId, dragTargetIndex);
+
+                    playClickSound();
                 }
             }
-
-            playClickSound();
-
-            draggingFavorite = false;
-            draggingFavoriteId.clear();
-            dragTargetIndex = 0;
         }
+
+        //
+        // --------------------------------------------------------
+        // SHORT CLICK
+        // --------------------------------------------------------
+        //
+
+        else if (favoriteDragPending && !releasedModuleId.empty()) {
+            float dx = cursorPos.x - favoritePressX;
+
+            float dy = cursorPos.y - favoritePressY;
+
+            float maxClickMovement = 8.0f * scale;
+
+            bool stayedNearPress = dx * dx + dy * dy <= maxClickMovement * maxClickMovement;
+
+            if (stayedNearPress) {
+                const auto* module = Nexus::NexusModuleRegistry::find(releasedModuleId);
+
+                if (module != nullptr && module->id == "xray") {
+                    playClickSound();
+
+                    openXRay = true;
+                }
+            }
+        }
+
+        favoriteDragPending = false;
+        draggingFavorite = false;
+
+        draggingFavoriteId.clear();
+
+        draggingFavoriteOriginalIndex = 0;
+        dragTargetIndex = 0;
     }
 
     //
@@ -645,8 +752,6 @@ void NexusScreen::onRender(Event&) {
     }
 
     dc.ctx->PushAxisAlignedClip(listRect.get(), D2D1_ANTIALIAS_MODE_ALIASED);
-
-    bool openXRay = false;
 
 auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int column, int row, float sectionTop, std::size_t favoriteIndex) {
         bool isDraggingThis = favorite && draggingFavorite && draggingFavoriteId == module.id;
@@ -709,9 +814,43 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
 
         bool tileHovered = isActive() && cursorInsideList && shouldSelect(tileRect, cursorPos);
 
-        d2d::Color tileColor = tileHovered ? d2d::Color::RGB(0x27, 0x27, 0x27) : d2d::Color::RGB(0x17, 0x17, 0x17);
+        //
+        // ========================================================
+        // HOVER BLOOM
+        // ========================================================
+        //
 
-        dc.fillRoundedRectangle(tileRect, tileColor, 10.0f * scale);
+        float& hoverAnim = moduleHoverAnim[module.id];
+
+        float hoverTarget = tileHovered ? 1.0f : 0.0f;
+
+        float hoverBlend = std::clamp(Latite::getRenderer().getDeltaTime() * 12.0f, 0.0f, 1.0f);
+
+        hoverAnim = std::lerp(hoverAnim, hoverTarget, hoverBlend);
+
+        int tileShade = static_cast<int>(std::lround(0x17 + hoverAnim * 0x10));
+
+        dc.fillRoundedRectangle(tileRect, d2d::Color::RGB(tileShade, tileShade, tileShade), 10.0f * scale);
+
+        //
+        // Outer soft bloom.
+        //
+
+        if (hoverAnim > 0.01f) {
+            d2d::Rect bloomRect = { tileRect.left - 1.0f * scale,
+
+                                    tileRect.top - 1.0f * scale,
+
+                                    tileRect.right + 1.0f * scale,
+
+                                    tileRect.bottom + 1.0f * scale };
+
+            dc.drawRoundedRectangle(bloomRect, d2d::Color::RGB(0x4B, 0x86, 0xBA).asAlpha(hoverAnim * 0.15f),
+                                    11.0f * scale, 2.5f * scale);
+
+            dc.drawRoundedRectangle(tileRect, d2d::Color::RGB(0x62, 0x92, 0xBC).asAlpha(hoverAnim * 0.35f),
+                                    10.0f * scale, 1.5f * scale);
+        }
 
         dc.drawRoundedRectangle(tileRect, d2d::Color::RGB(0x48, 0x48, 0x48).asAlpha(0.65f), 10.0f * scale,
                                 1.0f * scale);
@@ -759,39 +898,10 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
         }
 
         //
-        // DRAG HANDLE
-        //
-
-        d2d::Rect dragRect = { tileRect.left + 4.0f * scale, tileRect.top, tileRect.left + 30.0f * scale,
-                               tileRect.bottom };
-
-        bool dragHovered = favorite && searchText.empty() && isActive() && cursorInsideList && shouldSelect(dragRect, cursorPos);
-        
-        if (favorite) {
-
-            if (dragHovered || isDraggingThis) {
-                cursor = Cursor::Hand;
-            }
-
-            dc.drawText(dragRect, L"\u2261", isDraggingThis ? d2d::Colors::WHITE : d2d::Color::RGB(0x86, 0x86, 0x86),
-                        Renderer::FontSelection::PrimaryRegular, 18.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER,
-                        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
-            if (dragHovered && justClicked[0]) {
-                draggingFavorite = true;
-                draggingFavoriteId = module.id;
-                dragTargetIndex = favoriteIndex;
-
-                dragOffsetX = cursorPos.x - tileRect.left;
-                dragOffsetY = cursorPos.y - tileRect.top;
-            }
-        }
-
-        //
         // TEXT
         //
 
-        float textLeft = tileRect.left + (favorite ? 34.0f : 12.0f) * scale;
+        float textLeft = tileRect.left + 12.0f * scale;
 
         d2d::Rect nameRect;
 
@@ -841,18 +951,63 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
                         9.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
 
+//
+        // ========================================================
+        // CARD BODY
+        // ========================================================
         //
-        // OPEN SETTINGS
+        // Favorite module:
+        //
+        // quick click
+        //     -> module action
+        //
+        // long hold
+        //     -> drag/reorder
+        //
+        // Non-favorite module:
+        //
+        // normal click behavior
         //
 
-        bool bodyHovered = tileHovered && !starHovered && !actionHovered && !dragHovered;
+        bool bodyHovered = tileHovered && !starHovered && !actionHovered;
 
         if (implemented && bodyHovered) {
             cursor = Cursor::Hand;
         }
 
-        if (implemented && bodyHovered && justClicked[0]) {
+        //
+        // Favorite cards use delayed click/hold behavior.
+        //
+
+        if (favorite && searchText.empty() && bodyHovered && justClicked[0] && !favoriteDragPending &&
+            !draggingFavorite) {
+            favoriteDragPending = true;
+
+            draggingFavoriteId = module.id;
+
+            draggingFavoriteOriginalIndex = favoriteIndex;
+
+            dragTargetIndex = favoriteIndex;
+
+            favoritePressTime = std::chrono::steady_clock::now();
+
+            favoritePressX = cursorPos.x;
+
+            favoritePressY = cursorPos.y;
+
+            dragOffsetX = cursorPos.x - tileRect.left;
+
+            dragOffsetY = cursorPos.y - tileRect.top;
+        }
+
+        //
+        // Non-favorites are not reorderable in the existing favorite-order
+        // system, so they retain normal click behavior.
+        //
+
+        else if (!favorite && implemented && bodyHovered && justClicked[0]) {
             playClickSound();
+
             openXRay = true;
         }
     };
@@ -933,16 +1088,10 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
             d2d::Rect floatingStarRect = { floatingActionRect.left - 6.0f * scale - floatingStarWidth, draggedRect.top,
                                            floatingActionRect.left - 6.0f * scale, draggedRect.bottom };
 
-            d2d::Rect floatingHandleRect = { draggedRect.left + 4.0f * scale, draggedRect.top,
-                                             draggedRect.left + 30.0f * scale, draggedRect.bottom };
-
-            dc.drawText(floatingHandleRect, L"\u2261", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
-                        18.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
             dc.drawText(floatingStarRect, L"\u2605", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
                         20.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
-            float floatingTextLeft = draggedRect.left + 34.0f * scale;
+            float floatingTextLeft = draggedRect.left + 12.0f * scale;
 
             d2d::Rect floatingNameRect;
 

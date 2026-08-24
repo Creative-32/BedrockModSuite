@@ -3148,42 +3148,55 @@ namespace Nexus {
         //
 
         auto getOreColor = [&](OreType type) -> d2d::Color {
+            std::size_t colorIndex = 0;
+
+            switch (type) {
+            case OreType::Diamond:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Diamond);
+                break;
+
+            case OreType::Emerald:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Emerald);
+                break;
+
+            case OreType::AncientDebris:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::AncientDebris);
+                break;
+
+            case OreType::Gold:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Gold);
+                break;
+
+            case OreType::Iron:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Iron);
+                break;
+
+            case OreType::Copper:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Copper);
+                break;
+
+            case OreType::Redstone:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Redstone);
+                break;
+
+            case OreType::Lapis:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Lapis);
+                break;
+
+            case OreType::Coal:
+                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Coal);
+                break;
+            }
+
+            const XRayColor& base = xRaySettings.oreColors[colorIndex];
+
             float brightness = std::clamp(static_cast<float>(xRaySettings.oreBrightness) / 100.0f, 0.10f, 1.50f);
 
             auto channel = [&](int value) -> int {
                 return std::clamp(static_cast<int>(std::lround(static_cast<float>(value) * brightness)), 0, 255);
             };
 
-            switch (type) {
-            case OreType::Diamond:
-                return d2d::Color::RGB(channel(0x42), channel(0xE6), channel(0xD5));
-
-            case OreType::Emerald:
-                return d2d::Color::RGB(channel(0x35), channel(0xD0), channel(0x63));
-
-            case OreType::Gold:
-                return d2d::Color::RGB(channel(0xF5), channel(0xD4), channel(0x42));
-
-            case OreType::Iron:
-                return d2d::Color::RGB(channel(0xD8), channel(0xC5), channel(0xB0));
-
-            case OreType::Redstone:
-                return d2d::Color::RGB(channel(0xE0), channel(0x35), channel(0x35));
-
-            case OreType::Lapis:
-                return d2d::Color::RGB(channel(0x38), channel(0x68), channel(0xD8));
-
-            case OreType::Coal:
-                return d2d::Color::RGB(channel(0x70), channel(0x70), channel(0x70));
-
-            case OreType::Copper:
-                return d2d::Color::RGB(channel(0xD7), channel(0x7A), channel(0x45));
-
-            case OreType::AncientDebris:
-                return d2d::Color::RGB(channel(0x9C), channel(0x64), channel(0x4B));
-            }
-
-            return d2d::Color::RGB(channel(0xFF), channel(0xFF), channel(0xFF));
+            return d2d::Color::RGB(channel(base.r), channel(base.g), channel(base.b));
         };
 
         //

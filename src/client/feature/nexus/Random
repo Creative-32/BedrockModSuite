@@ -1,0 +1,2437 @@
+i like that, give me code to make it like that
+#pragma once
+
+#include "../Screen.h"
+
+    class XRayScreen final : public Screen {
+public:
+    XRayScreen();
+
+    std::string getName() override { return "XRay"; }
+
+protected:
+    void onEnable(bool ignoreAnimations) override;
+    void onDisable() override;
+
+private:
+    void onRender(Event& event);
+};
+
+#pragma once
+
+#include "../Screen.h"
+
+i like that, make a road map for the xray mode based on all the suggestions weve had along with basing it off that photo, then give me the code
+#include "../TextBox.h"
+#include <cstddef>
+#include <string>
+#include <unordered_map>
+
+class NexusScreen final : public Screen {
+public:
+    NexusScreen();
+
+    std::string getName() override { return "Nexus"; }
+
+    void prepareForSubmenu() { skipCloseAnimation = true; }
+
+protected:
+    void onEnable(bool ignoreAnimations) override;
+    void onDisable() override;
+
+private:
+    void onRender(Event& event);
+    void onClick(Event& event);
+
+    void onChar(Event& event);
+    void onKey(Event& event);
+
+    float openAnim = 0.0f;
+    bool skipCloseAnimation = false;
+
+    float scroll = 0.0f;
+    float lerpScroll = 0.0f;
+    float scrollMax = 0.0f;
+
+    bool draggingFavorite = false;
+    std::string draggingFavoriteId {};
+    std::size_t dragTargetIndex = 0;
+
+    float dragOffsetX = 0.0f;
+    float dragOffsetY = 0.0f;
+
+    std::unordered_map<std::string, float> favoriteAnimX {};
+    std::unordered_map<std::string, float> favoriteAnimY {};
+
+    TextBox searchBox {};
+};
+
+#include "pch.h"
+#include "NexusScreen.h"
+
+#include "XRayScreen.h"
+
+#include "client/Latite.h"
+#include "client/event/Eventing.h"
+#include "client/event/events/ClickEvent.h"
+#include "client/event/events/CharEvent.h"
+#include "client/event/events/KeyUpdateEvent.h"
+#include "client/event/events/RenderOverlayEvent.h"
+#include "client/screen/ScreenManager.h"
+#include "client/feature/nexus/navigation/NexusNavigation.h"
+
+#include "client/feature/nexus/NexusConfig.h"
+#include "client/feature/nexus/module/NexusModuleRegistry.h"
+#include "client/feature/nexus/ui/NexusControls.h"
+#include "client/feature/nexus/xray/XRaySettings.h"
+#include "client/feature/nexus/notification/NexusNotificationManager.h"
+#include "client/feature/nexus/xray/XRayScanner.h"
+
+#include "util/DrawContext.h"
+
+#include <algorithm>
+#include <vector>
+
+#include <cwctype>
+
+NexusScreen::NexusScreen() {
+    Nexus::NexusConfig::load();
+    Nexus::NexusNotificationManager::initialize();
+    Nexus::XRayScanner::initialize();
+
+    this->key = KeyValue(Nexus::NexusConfig::menuKey);
+
+    Eventing::get().listen<RenderOverlayEvent>(this, (EventListenerFunc)&NexusScreen::onRender, 1, true);
+
+    Eventing::get().listen<ClickEvent>(this, (EventListenerFunc)&NexusScreen::onClick, 1);
+
+    Eventing::get().listen<CharEvent>(this, (EventListenerFunc)&NexusScreen::onChar, 2);
+
+    Eventing::get().listen<KeyUpdateEvent>(this, (EventListenerFunc)&NexusScreen::onKey, 2);
+}
+
+void NexusScreen::onEnable(bool ignoreAnimations) {
+    openAnim = ignoreAnimations ? 1.0f : 0.0f;
+    skipCloseAnimation = false;
+
+    draggingFavorite = false;
+    draggingFavoriteId.clear();
+    dragTargetIndex = 0;
+    dragOffsetX = 0.0f;
+    dragOffsetY = 0.0f;
+
+    favoriteAnimX.clear();
+    favoriteAnimY.clear();
+
+    searchBox.setSelected(false);
+
+    resetInputState();
+}
+
+void NexusScreen::onDisable() {
+    resetInputState();
+
+    draggingFavorite = false;
+    draggingFavoriteId.clear();
+    dragTargetIndex = 0;
+    dragOffsetX = 0.0f;
+    dragOffsetY = 0.0f;
+
+    favoriteAnimX.clear();
+    favoriteAnimY.clear();
+
+    searchBox.setSelected(false);
+
+    if (skipCloseAnimation) {
+        openAnim = 0.0f;
+        skipCloseAnimation = false;
+    }
+}
+
+void NexusScreen::onClick(Event& event) {
+    if (!isActive()) return;
+
+    auto& clickEvent = reinterpret_cast<ClickEvent&>(event);
+
+    if (clickEvent.getClickType() != ClickEvent::ClickType::Wheel) {
+        return;
+    }
+
+    scroll = std::clamp(scroll - static_cast<float>(clickEvent.getWheelDelta()) / 3.0f, 0.0f, scrollMax);
+
+    clickEvent.setCancelled(true);
+}
+
+void NexusScreen::onChar(Event& event) {
+    if (!isActive() || !searchBox.isSelected()) {
+        return;
+    }
+
+    auto& charEvent = reinterpret_cast<CharEvent&>(event);
+
+    if (!charEvent.isChar()) {
+        return;
+    }
+
+    std::wstring before = searchBox.getText();
+
+    searchBox.onChar(charEvent.getChar());
+
+    if (searchBox.getText() != before) {
+        scroll = 0.0f;
+        lerpScroll = 0.0f;
+
+        favoriteAnimX.clear();
+        favoriteAnimY.clear();
+    }
+
+    charEvent.setCancelled(true);
+}
+
+void NexusScreen::onKey(Event& event) {
+    if (!isActive() || !searchBox.isSelected()) {
+        return;
+    }
+
+    auto& keyEvent = reinterpret_cast<KeyUpdateEvent&>(event);
+
+    if (!keyEvent.isDown()) {
+        return;
+    }
+
+    int pressedKey = keyEvent.getKey();
+
+    //
+    // ESC clears search and stops typing.
+    //
+
+    if (pressedKey == VK_ESCAPE) {
+        searchBox.reset();
+        searchBox.setSelected(false);
+
+        scroll = 0.0f;
+        lerpScroll = 0.0f;
+
+        favoriteAnimX.clear();
+        favoriteAnimY.clear();
+
+        keyEvent.setCancelled(true);
+        return;
+    }
+
+    //
+    // Move the text caret.
+    //
+
+    if (pressedKey == VK_LEFT || pressedKey == VK_RIGHT) {
+        searchBox.onKeyDown(pressedKey);
+    }
+
+    //
+    // Block Nexus/Latite keybinds while typing.
+    // Actual letters and Backspace come through CharEvent.
+    //
+
+    keyEvent.setCancelled(true);
+}
+
+void NexusScreen::onRender(Event&) {
+    if (!isActive() && openAnim <= 0.005f) {
+        openAnim = 0.0f;
+        return;
+    }
+
+    D2DUtil dc;
+
+    auto& cursorPos = SDK::ClientInstance::get()->cursorPos;
+
+    cursor = Cursor::Arrow;
+
+    D2D1_SIZE_F screenSize = Latite::getRenderer().getScreenSize();
+
+    float scale = std::clamp(screenSize.width / 1920.0f, 0.72f, 1.10f);
+
+    float panelWidth = std::min(screenSize.width * 0.78f, 900.0f * scale);
+
+    float panelHeight = std::min(screenSize.height * 0.76f, 620.0f * scale);
+
+    d2d::Rect panelRect = { (screenSize.width - panelWidth) * 0.5f, (screenSize.height - panelHeight) * 0.5f,
+                            (screenSize.width + panelWidth) * 0.5f, (screenSize.height + panelHeight) * 0.5f };
+
+    D2D1::Matrix3x2F originalTransform;
+
+    dc.ctx->GetTransform(&originalTransform);
+
+    float targetAnim = isActive() ? 1.0f : 0.0f;
+
+    openAnim = std::lerp(openAnim, targetAnim, Latite::getRenderer().getDeltaTime() * 0.2f);
+
+    if (isActive() && openAnim > 0.995f) {
+        openAnim = 1.0f;
+    }
+
+    if (!isActive() && openAnim < 0.005f) {
+        openAnim = 0.0f;
+        return;
+    }
+
+    float easedAnim = openAnim * openAnim * (3.0f - 2.0f * openAnim);
+
+    dc.ctx->SetTransform(
+        D2D1::Matrix3x2F::Scale({ easedAnim, easedAnim }, D2D1_POINT_2F(panelRect.center().x, panelRect.center().y)) *
+        originalTransform);
+
+    //
+    // PANEL
+    //
+
+    d2d::Color panelColor = d2d::Color::RGB(0x0B, 0x0B, 0x0B).asAlpha(0.90f);
+
+    d2d::Color panelOutline = d2d::Color::RGB(0x45, 0x45, 0x45).asAlpha(0.75f);
+
+    float panelRadius = 18.0f * scale;
+
+    dc.fillRoundedRectangle(panelRect, panelColor, panelRadius);
+
+    dc.drawRoundedRectangle(panelRect, panelOutline, panelRadius, 1.5f * scale);
+
+    float padding = 28.0f * scale;
+
+    //
+    // TITLE
+    //
+
+    d2d::Rect titleRect = { panelRect.left + padding, panelRect.top + 14.0f * scale, panelRect.right - padding,
+                            panelRect.top + 54.0f * scale };
+
+    dc.drawText(titleRect, L"Nexus", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryLight, 28.0f * scale,
+                DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, false);
+
+    //
+    // VIEW MODE
+    //
+
+    float viewButtonHeight = 26.0f * scale;
+
+    float viewGap = 6.0f * scale;
+
+    float compactWidth = 72.0f * scale;
+
+    float mediumWidth = 72.0f * scale;
+
+    float listWidth = 52.0f * scale;
+
+    float viewRight = panelRect.right - padding;
+
+    float viewTop = panelRect.top + 49.0f * scale;
+
+    d2d::Rect compactViewRect = { viewRight - compactWidth, viewTop, viewRight, viewTop + viewButtonHeight };
+
+    d2d::Rect mediumViewRect = { compactViewRect.left - viewGap - mediumWidth, viewTop, compactViewRect.left - viewGap,
+                                 viewTop + viewButtonHeight };
+
+    d2d::Rect listViewRect = { mediumViewRect.left - viewGap - listWidth, viewTop, mediumViewRect.left - viewGap,
+                               viewTop + viewButtonHeight };
+
+    auto drawViewButton = [&](const d2d::Rect& rect, const std::wstring& text, Nexus::NexusViewMode mode) {
+        bool selected = Nexus::NexusConfig::viewMode == mode;
+
+        bool hovering = isActive() && shouldSelect(rect, cursorPos);
+
+        if (hovering) {
+            cursor = Cursor::Hand;
+        }
+
+        d2d::Color background;
+
+        if (selected) {
+            background = d2d::Color::RGB(0x42, 0x78, 0xA8);
+        } else if (hovering) {
+            background = d2d::Color::RGB(0x32, 0x32, 0x32);
+        } else {
+            background = d2d::Color::RGB(0x20, 0x20, 0x20);
+        }
+
+        dc.fillRoundedRectangle(rect, background, 7.0f * scale);
+
+        dc.drawText(rect, text, d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular, 11.0f * scale,
+                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        if (hovering && justClicked[0] && !selected) {
+            Nexus::NexusConfig::viewMode = mode;
+
+            Nexus::NexusConfig::save();
+
+            scroll = 0.0f;
+            lerpScroll = 0.0f;
+
+            draggingFavorite = false;
+            draggingFavoriteId.clear();
+            dragTargetIndex = 0;
+
+            favoriteAnimX.clear();
+            favoriteAnimY.clear();
+
+            playClickSound();
+        }
+    };
+
+    drawViewButton(listViewRect, L"List", Nexus::NexusViewMode::List);
+
+    drawViewButton(mediumViewRect, L"Medium", Nexus::NexusViewMode::Medium);
+
+    drawViewButton(compactViewRect, L"Compact", Nexus::NexusViewMode::Compact);
+
+    //
+    // SUBTITLE
+    //
+
+    d2d::Rect subtitleRect = { panelRect.left + padding, panelRect.top + 48.0f * scale, panelRect.right - padding,
+                               panelRect.top + 76.0f * scale };
+
+    dc.drawText(subtitleRect, L"Select a module", d2d::Color::RGB(0xB0, 0xB0, 0xB0).asAlpha(0.80f),
+                Renderer::FontSelection::PrimaryRegular, 14.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    //
+    // SEARCH
+    //
+
+    d2d::Rect searchRect = { panelRect.left + padding, panelRect.top + 80.0f * scale, panelRect.right - padding,
+                             panelRect.top + 110.0f * scale };
+
+    bool hasSearchText = !searchBox.getText().empty();
+
+    //
+    // Leave padding on the left and room
+    // for the clear button on the right.
+    //
+
+    d2d::Rect searchTextRect = { searchRect.left + 10.0f * scale, searchRect.top + 4.0f * scale,
+                                 searchRect.right - (hasSearchText ? 34.0f * scale : 10.0f * scale),
+                                 searchRect.bottom - 4.0f * scale };
+
+    searchBox.setRect(searchTextRect);
+
+    bool searchHovered = isActive() && shouldSelect(searchRect, cursorPos);
+
+    d2d::Rect clearRect = { searchRect.right - 28.0f * scale, searchRect.top + 4.0f * scale,
+                            searchRect.right - 6.0f * scale, searchRect.bottom - 4.0f * scale };
+
+    bool clearHovered = hasSearchText && isActive() && shouldSelect(clearRect, cursorPos);
+
+    if (clearHovered) {
+        cursor = Cursor::Hand;
+    } else if (searchHovered) {
+        cursor = Cursor::IBeam;
+    }
+
+    if (justClicked[0]) {
+        if (clearHovered) {
+            searchBox.reset();
+            searchBox.setSelected(true);
+
+            scroll = 0.0f;
+            lerpScroll = 0.0f;
+
+            favoriteAnimX.clear();
+            favoriteAnimY.clear();
+
+            playClickSound();
+        } else {
+            searchBox.setSelected(searchHovered);
+        }
+    }
+
+    d2d::Color searchBackground = searchBox.isSelected() ? d2d::Color::RGB(0x24, 0x24, 0x24)
+                                  : searchHovered        ? d2d::Color::RGB(0x20, 0x20, 0x20)
+                                                         : d2d::Color::RGB(0x18, 0x18, 0x18);
+
+    //
+    // Draw the full search box ourselves.
+    //
+
+    dc.fillRoundedRectangle(searchRect, searchBackground, 8.0f * scale);
+
+    dc.drawRoundedRectangle(
+        searchRect, searchBox.isSelected() ? d2d::Color::RGB(0x42, 0x78, 0xA8) : d2d::Color::RGB(0x48, 0x48, 0x48),
+        8.0f * scale, searchBox.isSelected() ? 1.5f * scale : 1.0f * scale);
+
+    //
+    // TextBox now only supplies text + caret.
+    // Transparent background keeps our outer box visible.
+    //
+
+    searchBox.render(dc, 0.0f, d2d::Color::RGB(0x00, 0x00, 0x00).asAlpha(0.0f), d2d::Colors::WHITE,
+                     DWRITE_TEXT_ALIGNMENT_LEADING);
+
+    if (searchBox.getText().empty() && !searchBox.isSelected()) {
+        dc.drawText(searchTextRect, L"Search modules...", d2d::Color::RGB(0x82, 0x82, 0x82),
+                    Renderer::FontSelection::PrimaryRegular, 13.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
+                    DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
+
+    //
+    // CLEAR BUTTON
+    //
+
+    if (hasSearchText) {
+        d2d::Color clearColor = clearHovered ? d2d::Color::RGB(0x45, 0x45, 0x45) : d2d::Color::RGB(0x2A, 0x2A, 0x2A);
+
+        dc.fillRoundedRectangle(clearRect, clearColor, 6.0f * scale);
+
+        dc.drawText(clearRect, L"X", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular, 12.0f * scale,
+                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
+
+    //
+    // BUILD DISPLAY ORDER
+    //
+
+    const auto& modules = Nexus::NexusModuleRegistry::getModules();
+
+    const auto& favoriteOrder = Nexus::NexusConfig::getFavoriteOrder();
+
+    std::vector<const Nexus::NexusModuleInfo*> favoriteModules;
+
+    std::vector<const Nexus::NexusModuleInfo*> normalModules;
+
+    for (const auto& favoriteId : favoriteOrder) {
+        const auto* module = Nexus::NexusModuleRegistry::find(favoriteId);
+
+        if (module != nullptr) {
+            favoriteModules.push_back(module);
+        }
+    }
+
+    for (const auto& module : modules) {
+        bool favorite = std::find(favoriteOrder.begin(), favoriteOrder.end(), module.id) != favoriteOrder.end();
+
+        if (!favorite) {
+            normalModules.push_back(&module);
+        }
+    }
+
+    std::sort(normalModules.begin(), normalModules.end(),
+              [](const Nexus::NexusModuleInfo* a, const Nexus::NexusModuleInfo* b) {
+                  return a->name < b->name;
+              });
+
+    //
+    // SEARCH FILTER
+    //
+
+    std::wstring searchText = searchBox.getText();
+
+    std::transform(searchText.begin(), searchText.end(), searchText.begin(), [](wchar_t ch) {
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+
+    if (!searchText.empty()) {
+        auto matchesSearch = [&](const Nexus::NexusModuleInfo* module) {
+            std::wstring name = module->name;
+
+            std::wstring description = module->description;
+
+            std::transform(name.begin(), name.end(), name.begin(), [](wchar_t ch) {
+                return static_cast<wchar_t>(std::towlower(ch));
+            });
+
+            std::transform(description.begin(), description.end(), description.begin(), [](wchar_t ch) {
+                return static_cast<wchar_t>(std::towlower(ch));
+            });
+
+            return name.find(searchText) != std::wstring::npos || description.find(searchText) != std::wstring::npos;
+        };
+
+        std::erase_if(favoriteModules, [&](const Nexus::NexusModuleInfo* module) {
+            return !matchesSearch(module);
+        });
+
+        std::erase_if(normalModules, [&](const Nexus::NexusModuleInfo* module) {
+            return !matchesSearch(module);
+        });
+    }
+
+    //
+    // LIST AREA
+    //
+
+    d2d::Rect listRect = { panelRect.left + padding, panelRect.top + 120.0f * scale, panelRect.right - padding,
+                           panelRect.bottom - 56.0f * scale };
+
+    int columnCount = 1;
+
+    float tileHeight = 58.0f * scale;
+
+    bool showDescription = true;
+
+    switch (Nexus::NexusConfig::viewMode) {
+    case Nexus::NexusViewMode::Medium:
+        columnCount = 2;
+        tileHeight = 72.0f * scale;
+        showDescription = true;
+        break;
+
+    case Nexus::NexusViewMode::Compact:
+        columnCount = 3;
+        tileHeight = 50.0f * scale;
+        showDescription = false;
+        break;
+
+    case Nexus::NexusViewMode::List:
+    default:
+        columnCount = 1;
+        tileHeight = 58.0f * scale;
+        showDescription = true;
+        break;
+    }
+
+    //
+    // RESPONSIVE FALLBACK
+    //
+
+    float minimumTileWidth =
+        Nexus::NexusConfig::viewMode == Nexus::NexusViewMode::Compact ? 210.0f * scale : 300.0f * scale;
+
+    while (columnCount > 1) {
+        float testWidth =
+            (listRect.getWidth() - 10.0f * scale - (columnCount - 1) * 8.0f * scale) / static_cast<float>(columnCount);
+
+        if (testWidth >= minimumTileWidth) {
+            break;
+        }
+
+        columnCount--;
+    }
+
+    float tileGap = 8.0f * scale;
+
+    float sectionGap = 14.0f * scale;
+
+    float availableWidth = listRect.getWidth() - 10.0f * scale;
+
+    float tileWidth =
+        (availableWidth - tileGap * static_cast<float>(columnCount - 1)) / static_cast<float>(columnCount);
+
+    auto sectionHeight = [&](std::size_t count) {
+        if (count == 0) {
+            return 0.0f;
+        }
+
+        std::size_t rows = (count + static_cast<std::size_t>(columnCount) - 1) / static_cast<std::size_t>(columnCount);
+
+        return static_cast<float>(rows) * tileHeight + static_cast<float>(rows - 1) * tileGap;
+    };
+
+    float favoritesHeight = sectionHeight(favoriteModules.size());
+
+    float normalHeight = sectionHeight(normalModules.size());
+
+    float contentHeight = favoritesHeight + normalHeight;
+
+    if (!favoriteModules.empty() && !normalModules.empty()) {
+        contentHeight += sectionGap;
+    }
+
+    scrollMax = std::max(0.0f, contentHeight - listRect.getHeight());
+
+    scroll = std::clamp(scroll, 0.0f, scrollMax);
+
+    lerpScroll = std::lerp(lerpScroll, scroll, Latite::getRenderer().getDeltaTime() / 5.0f);
+
+    lerpScroll = std::clamp(lerpScroll, 0.0f, scrollMax);
+
+    //
+    // FAVORITE DRAG TARGET
+    //
+
+    if (draggingFavorite) {
+        if (favoriteModules.empty()) {
+            draggingFavorite = false;
+            draggingFavoriteId.clear();
+            dragTargetIndex = 0;
+            favoriteAnimX.clear();
+            favoriteAnimY.clear();
+        } else if (mouseButtons[0]) {
+            if (listRect.contains(cursorPos)) {
+                float localX = cursorPos.x - listRect.left;
+
+                float localY = cursorPos.y + lerpScroll - listRect.top;
+
+                int targetColumn = static_cast<int>(localX / (tileWidth + tileGap));
+
+                int targetRow = static_cast<int>(localY / (tileHeight + tileGap));
+
+                targetColumn = std::clamp(targetColumn, 0, columnCount - 1);
+
+                targetRow = std::max(targetRow, 0);
+
+                std::size_t targetIndex = static_cast<std::size_t>(targetRow * columnCount + targetColumn);
+
+                dragTargetIndex = std::min(targetIndex, favoriteModules.size() - 1);
+            }
+        } else {
+            auto current = std::find(favoriteOrder.begin(), favoriteOrder.end(), draggingFavoriteId);
+
+            if (current != favoriteOrder.end()) {
+                std::size_t currentIndex = static_cast<std::size_t>(current - favoriteOrder.begin());
+
+                if (currentIndex != dragTargetIndex) {
+                    Nexus::NexusConfig::moveFavorite(draggingFavoriteId, dragTargetIndex);
+                }
+            }
+
+            playClickSound();
+
+            draggingFavorite = false;
+            draggingFavoriteId.clear();
+            dragTargetIndex = 0;
+        }
+    }
+
+    //
+    // LIVE FAVORITE PREVIEW ORDER
+    //
+
+    std::vector<const Nexus::NexusModuleInfo*> displayFavoriteModules = favoriteModules;
+
+    if (draggingFavorite && !displayFavoriteModules.empty()) {
+        auto draggedIt = std::find_if(displayFavoriteModules.begin(), displayFavoriteModules.end(),
+                                      [&](const Nexus::NexusModuleInfo* module) {
+                                          return module->id == draggingFavoriteId;
+                                      });
+
+        if (draggedIt != displayFavoriteModules.end()) {
+            const Nexus::NexusModuleInfo* dragged = *draggedIt;
+
+            displayFavoriteModules.erase(draggedIt);
+
+            std::size_t insertIndex = std::min(dragTargetIndex, displayFavoriteModules.size());
+
+            displayFavoriteModules.insert(displayFavoriteModules.begin() + insertIndex, dragged);
+        }
+    }
+
+    dc.ctx->PushAxisAlignedClip(listRect.get(), D2D1_ANTIALIAS_MODE_ALIASED);
+
+    bool openXRay = false;
+
+    auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int column, int row, float sectionTop,
+                          std::size_t favoriteIndex) {
+        bool isDraggingThis = favorite && draggingFavorite && draggingFavoriteId == module.id;
+
+        float targetLeft = listRect.left + static_cast<float>(column) * (tileWidth + tileGap);
+
+        float targetContentTop = sectionTop + static_cast<float>(row) * (tileHeight + tileGap);
+
+        float left = targetLeft;
+
+        float contentTop = targetContentTop;
+
+        //
+        // Smoothly move favorites toward their
+        // temporary preview positions.
+        //
+
+        if (favorite) {
+            auto [xIt, insertedX] = favoriteAnimX.try_emplace(module.id, targetLeft);
+
+            auto [yIt, insertedY] = favoriteAnimY.try_emplace(module.id, targetContentTop);
+
+            if (isDraggingThis) {
+                //
+                // The placeholder should immediately
+                // occupy the current destination slot.
+                //
+
+                xIt->second = targetLeft;
+
+                yIt->second = targetContentTop;
+            } else {
+                float reflowAmount = std::clamp(Latite::getRenderer().getDeltaTime() * 14.0f, 0.0f, 1.0f);
+
+                xIt->second = std::lerp(xIt->second, targetLeft, reflowAmount);
+
+                yIt->second = std::lerp(yIt->second, targetContentTop, reflowAmount);
+            }
+
+            left = xIt->second;
+
+            contentTop = yIt->second;
+        }
+
+        float top = contentTop - lerpScroll;
+
+        d2d::Rect tileRect = { left, top, left + tileWidth, top + tileHeight };
+
+        if (isDraggingThis) {
+            dc.fillRoundedRectangle(tileRect, d2d::Color::RGB(0x12, 0x12, 0x12), 10.0f * scale);
+
+            return;
+        }
+
+        if (tileRect.bottom < listRect.top || tileRect.top > listRect.bottom) {
+            return;
+        }
+
+        bool cursorInsideList = listRect.contains(cursorPos);
+
+        bool tileHovered = isActive() && cursorInsideList && shouldSelect(tileRect, cursorPos);
+
+        d2d::Color tileColor = tileHovered ? d2d::Color::RGB(0x27, 0x27, 0x27) : d2d::Color::RGB(0x17, 0x17, 0x17);
+
+        dc.fillRoundedRectangle(tileRect, tileColor, 10.0f * scale);
+
+        dc.drawRoundedRectangle(tileRect, d2d::Color::RGB(0x48, 0x48, 0x48).asAlpha(0.65f), 10.0f * scale,
+                                1.0f * scale);
+
+        if (favorite && draggingFavorite && favoriteIndex == dragTargetIndex) {
+            dc.drawRoundedRectangle(tileRect, d2d::Color::RGB(0x42, 0x78, 0xA8), 10.0f * scale, 2.0f * scale);
+        }
+
+        //
+        // ACTION
+        //
+
+        float actionWidth = 48.0f * scale;
+
+        float actionHeight = 22.0f * scale;
+
+        d2d::Rect actionRect = { tileRect.right - 10.0f * scale - actionWidth,
+                                 tileRect.center().y - actionHeight * 0.5f, tileRect.right - 10.0f * scale,
+                                 tileRect.center().y + actionHeight * 0.5f };
+
+        //
+        // STAR
+        //
+
+        float starWidth = 30.0f * scale;
+
+        d2d::Rect starRect = { actionRect.left - 6.0f * scale - starWidth, tileRect.top, actionRect.left - 6.0f * scale,
+                               tileRect.bottom };
+
+        bool starHovered = isActive() && cursorInsideList && shouldSelect(starRect, cursorPos);
+
+        if (starHovered) {
+            cursor = Cursor::Hand;
+        }
+
+        dc.drawText(starRect, favorite ? L"\u2605" : L"\u2606",
+                    favorite ? d2d::Colors::WHITE : d2d::Color::RGB(0x88, 0x88, 0x88),
+                    Renderer::FontSelection::PrimaryRegular, 20.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER,
+                    DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        if (starHovered && justClicked[0]) {
+            Nexus::NexusConfig::setFavorite(module.id, !favorite);
+
+            playClickSound();
+        }
+
+        //
+        // DRAG HANDLE
+        //
+
+        d2d::Rect dragRect = { tileRect.left + 4.0f * scale, tileRect.top, tileRect.left + 30.0f * scale,
+                               tileRect.bottom };
+
+        bool dragHovered =
+            favorite && searchText.empty() && isActive() && cursorInsideList && shouldSelect(dragRect, cursorPos);
+
+        if (favorite) {
+            if (dragHovered || isDraggingThis) {
+                cursor = Cursor::Hand;
+            }
+
+            dc.drawText(dragRect, L"\u2261", isDraggingThis ? d2d::Colors::WHITE : d2d::Color::RGB(0x86, 0x86, 0x86),
+                        Renderer::FontSelection::PrimaryRegular, 18.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER,
+                        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+            if (dragHovered && justClicked[0]) {
+                draggingFavorite = true;
+                draggingFavoriteId = module.id;
+                dragTargetIndex = favoriteIndex;
+
+                dragOffsetX = cursorPos.x - tileRect.left;
+                dragOffsetY = cursorPos.y - tileRect.top;
+            }
+        }
+
+        //
+        // TEXT
+        //
+
+        float textLeft = tileRect.left + (favorite ? 34.0f : 12.0f) * scale;
+
+        d2d::Rect nameRect;
+
+        if (showDescription) {
+            nameRect = { textLeft, tileRect.top + 4.0f * scale, starRect.left - 6.0f * scale,
+                         tileRect.top + 31.0f * scale };
+        } else {
+            nameRect = { textLeft, tileRect.top, starRect.left - 6.0f * scale, tileRect.bottom };
+        }
+
+        dc.drawText(nameRect, module.name, d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
+                    Nexus::NexusConfig::viewMode == Nexus::NexusViewMode::Compact ? 14.0f * scale : 16.0f * scale,
+                    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        if (showDescription) {
+            d2d::Rect descriptionRect = { textLeft, tileRect.top + 28.0f * scale, starRect.left - 6.0f * scale,
+                                          tileRect.bottom - 4.0f * scale };
+
+            dc.drawText(descriptionRect, module.description, d2d::Color::RGB(0xA0, 0xA0, 0xA0),
+                        Renderer::FontSelection::PrimaryRegular, 11.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
+                        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
+
+        //
+        // SWITCH / SOON
+        //
+
+        bool actionHovered = isActive() && cursorInsideList && shouldSelect(actionRect, cursorPos);
+
+        bool implemented = module.id == "xray";
+
+        if (implemented) {
+            if (actionHovered) {
+                cursor = Cursor::Hand;
+            }
+
+            if (Nexus::UI::drawSwitch(dc, actionRect, Nexus::xRaySettings.enabled, actionHovered, justClicked[0],
+                                      scale)) {
+                playClickSound();
+
+                Nexus::NexusConfig::save();
+            }
+        } else {
+            dc.fillRoundedRectangle(actionRect, d2d::Color::RGB(0x2C, 0x2C, 0x2C), actionRect.getHeight() * 0.5f);
+
+            dc.drawText(actionRect, L"SOON", d2d::Color::RGB(0x91, 0x91, 0x91), Renderer::FontSelection::PrimaryRegular,
+                        9.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
+
+        //
+        // OPEN SETTINGS
+        //
+
+        bool bodyHovered = tileHovered && !starHovered && !actionHovered && !dragHovered;
+
+        if (implemented && bodyHovered) {
+            cursor = Cursor::Hand;
+        }
+
+        if (implemented && bodyHovered && justClicked[0]) {
+            playClickSound();
+            openXRay = true;
+        }
+    };
+
+    //
+    // FAVORITES
+    //
+
+    float favoritesTop = listRect.top;
+
+    for (std::size_t i = 0; i < displayFavoriteModules.size(); ++i) {
+        int row = static_cast<int>(i / columnCount);
+
+        int column = static_cast<int>(i % columnCount);
+
+        drawModule(*displayFavoriteModules[i], true, column, row, favoritesTop, i);
+    }
+
+    //
+    // NORMAL MODULES
+    //
+
+    float normalTop = favoritesTop + favoritesHeight;
+
+    if (!favoriteModules.empty() && !normalModules.empty()) {
+        normalTop += sectionGap;
+    }
+
+    for (std::size_t i = 0; i < normalModules.size(); ++i) {
+        int row = static_cast<int>(i / columnCount);
+
+        int column = static_cast<int>(i % columnCount);
+
+        drawModule(*normalModules[i], false, column, row, normalTop, 0);
+    }
+
+    //
+    // FLOATING DRAGGED FAVORITE
+    //
+
+    if (draggingFavorite) {
+        const auto* draggedModule = Nexus::NexusModuleRegistry::find(draggingFavoriteId);
+
+        if (draggedModule != nullptr) {
+            float draggedLeft = cursorPos.x - dragOffsetX;
+
+            float draggedTop = cursorPos.y - dragOffsetY;
+
+            //
+            // Keep the floating tile inside the module area.
+            //
+
+            draggedLeft = std::clamp(draggedLeft, listRect.left, listRect.right - 10.0f * scale - tileWidth);
+
+            draggedTop = std::clamp(draggedTop, listRect.top, listRect.bottom - tileHeight);
+
+            d2d::Rect draggedRect = { draggedLeft, draggedTop, draggedLeft + tileWidth, draggedTop + tileHeight };
+
+            //
+            // Slightly brighter "lifted" appearance.
+            //
+
+            dc.fillRoundedRectangle(draggedRect, d2d::Color::RGB(0x2C, 0x2C, 0x2C), 11.0f * scale);
+
+            dc.drawRoundedRectangle(draggedRect, d2d::Color::RGB(0x62, 0x92, 0xBC), 11.0f * scale, 2.0f * scale);
+
+            float floatingActionWidth = 48.0f * scale;
+
+            float floatingActionHeight = 22.0f * scale;
+
+            d2d::Rect floatingActionRect = { draggedRect.right - 10.0f * scale - floatingActionWidth,
+                                             draggedRect.center().y - floatingActionHeight * 0.5f,
+                                             draggedRect.right - 10.0f * scale,
+                                             draggedRect.center().y + floatingActionHeight * 0.5f };
+
+            float floatingStarWidth = 30.0f * scale;
+
+            d2d::Rect floatingStarRect = { floatingActionRect.left - 6.0f * scale - floatingStarWidth, draggedRect.top,
+                                           floatingActionRect.left - 6.0f * scale, draggedRect.bottom };
+
+            d2d::Rect floatingHandleRect = { draggedRect.left + 4.0f * scale, draggedRect.top,
+                                             draggedRect.left + 30.0f * scale, draggedRect.bottom };
+
+            dc.drawText(floatingHandleRect, L"\u2261", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
+                        18.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+            dc.drawText(floatingStarRect, L"\u2605", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
+                        20.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+            float floatingTextLeft = draggedRect.left + 34.0f * scale;
+
+            d2d::Rect floatingNameRect;
+
+            if (showDescription) {
+                floatingNameRect = { floatingTextLeft, draggedRect.top + 4.0f * scale,
+                                     floatingStarRect.left - 6.0f * scale, draggedRect.top + 31.0f * scale };
+            } else {
+                floatingNameRect = { floatingTextLeft, draggedRect.top, floatingStarRect.left - 6.0f * scale,
+                                     draggedRect.bottom };
+            }
+
+            dc.drawText(floatingNameRect, draggedModule->name, d2d::Colors::WHITE,
+                        Renderer::FontSelection::PrimaryRegular,
+                        Nexus::NexusConfig::viewMode == Nexus::NexusViewMode::Compact ? 14.0f * scale : 16.0f * scale,
+                        DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+            if (showDescription) {
+                d2d::Rect floatingDescriptionRect = { floatingTextLeft, draggedRect.top + 28.0f * scale,
+                                                      floatingStarRect.left - 6.0f * scale,
+                                                      draggedRect.bottom - 4.0f * scale };
+
+                dc.drawText(floatingDescriptionRect, draggedModule->description, d2d::Color::RGB(0xB0, 0xB0, 0xB0),
+                            Renderer::FontSelection::PrimaryRegular, 11.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
+                            DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            }
+
+            if (draggedModule->id == "xray") {
+                //
+                // Draw-only copy of the current X-Ray switch.
+                // Do not make it clickable while dragging.
+                //
+
+                bool floatingEnabled = Nexus::xRaySettings.enabled;
+
+                Nexus::UI::drawSwitch(dc, floatingActionRect, floatingEnabled, false, false, scale);
+            } else {
+                dc.fillRoundedRectangle(floatingActionRect, d2d::Color::RGB(0x34, 0x34, 0x34),
+                                        floatingActionRect.getHeight() * 0.5f);
+
+                dc.drawText(floatingActionRect, L"SOON", d2d::Color::RGB(0xA0, 0xA0, 0xA0),
+                            Renderer::FontSelection::PrimaryRegular, 9.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER,
+                            DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            }
+        }
+    }
+
+    dc.ctx->PopAxisAlignedClip();
+
+    //
+    // SCROLLBAR
+    //
+
+    if (scrollMax > 0.0f) {
+        float trackWidth = 4.0f * scale;
+
+        d2d::Rect trackRect = { listRect.right - trackWidth, listRect.top, listRect.right, listRect.bottom };
+
+        dc.fillRoundedRectangle(trackRect, d2d::Color::RGB(0x2D, 0x2D, 0x2D), trackWidth * 0.5f);
+
+        float visibleRatio = listRect.getHeight() / contentHeight;
+
+        float thumbHeight = std::max(30.0f * scale, listRect.getHeight() * visibleRatio);
+
+        thumbHeight = std::min(thumbHeight, listRect.getHeight());
+
+        float availableTrack = listRect.getHeight() - thumbHeight;
+
+        float scrollPercent = scrollMax > 0.0f ? lerpScroll / scrollMax : 0.0f;
+
+        float thumbTop = listRect.top + availableTrack * scrollPercent;
+
+        d2d::Rect thumbRect = { trackRect.left, thumbTop, trackRect.right, thumbTop + thumbHeight };
+
+        dc.fillRoundedRectangle(thumbRect, d2d::Color::RGB(0x72, 0x72, 0x72), trackWidth * 0.5f);
+    }
+
+    //
+    // VERSION
+    //
+
+    d2d::Rect versionRect = { panelRect.left + padding, panelRect.bottom - 38.0f * scale, panelRect.right - padding,
+                              panelRect.bottom - 12.0f * scale };
+
+    dc.drawText(versionRect, L"Nexus v0.1.0", d2d::Color::RGB(0xA0, 0xA0, 0xA0).asAlpha(0.70f),
+                Renderer::FontSelection::PrimaryRegular, 12.0f * scale, DWRITE_TEXT_ALIGNMENT_TRAILING,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // X-RAY PAGE SWITCH
+    //
+
+    if (openXRay) {
+        dc.ctx->SetTransform(originalTransform);
+
+        Nexus::NexusNavigation::openSubmenu<XRayScreen>(*this);
+
+        return;
+    }
+
+    dc.ctx->SetTransform(originalTransform);
+}
+
+#pragma once
+
+#include <filesystem>
+#include <string>
+#include <vector>
+
+namespace Nexus {
+
+    enum class NexusViewMode {
+        List,
+        Medium,
+        Compact
+    };
+
+    class NexusConfig {
+    public:
+        static void load();
+        static void save();
+
+        static bool isFavorite(const std::string& moduleId);
+
+        static void setFavorite(const std::string& moduleId, bool favorite);
+
+        static void moveFavorite(const std::string& moduleId, std::size_t newIndex);
+
+        static const std::vector<std::string>& getFavoriteOrder();
+
+        inline static int menuKey = 'N';
+
+        inline static NexusViewMode viewMode = NexusViewMode::List;
+
+    private:
+        static std::filesystem::path getConfigPath();
+
+        static void sanitizeFavoriteOrder();
+
+        inline static bool loaded = false;
+
+        inline static std::vector<std::string> favoriteOrder {};
+    };
+
+} // namespace Nexus
+
+#include "pch.h"
+#include "NexusConfig.h"
+
+#include "xray/XRaySettings.h"
+
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include "module/NexusModuleRegistry.h"
+
+namespace Nexus {
+
+    std::filesystem::path NexusConfig::getConfigPath() {
+        const char* localAppData = std::getenv("LOCALAPPDATA");
+
+        if (localAppData == nullptr) {
+            return std::filesystem::current_path() / "Nexus" / "config.json";
+        }
+
+        return std::filesystem::path(localAppData) / "Nexus" / "config.json";
+    }
+
+    void NexusConfig::load() {
+        if (loaded) return;
+
+        loaded = true;
+
+        const auto path = getConfigPath();
+
+        std::error_code ec;
+        std::filesystem::create_directories(path.parent_path(), ec);
+
+        std::ifstream file(path);
+
+        if (!file.is_open()) {
+            save();
+            return;
+        }
+
+        try {
+            nlohmann::json json;
+            file >> json;
+
+            menuKey = json.value("menuKey", static_cast<int>('N'));
+
+            std::string viewModeValue = json.value("viewMode", std::string("list"));
+
+            if (viewModeValue == "medium") {
+                viewMode = NexusViewMode::Medium;
+            } else if (viewModeValue == "compact") {
+                viewMode = NexusViewMode::Compact;
+            } else {
+                viewMode = NexusViewMode::List;
+            }
+
+            favoriteOrder.clear();
+
+            if (json.contains("favoriteOrder") && json["favoriteOrder"].is_array()) {
+                for (const auto& entry : json["favoriteOrder"]) {
+                    if (entry.is_string()) {
+                        favoriteOrder.push_back(entry.get<std::string>());
+                    }
+                }
+            }
+
+            sanitizeFavoriteOrder();
+
+            if (json.contains("xray") && json["xray"].is_object()) {
+                const auto& xray = json["xray"];
+
+                xRaySettings.enabled = xray.value("enabled", xRaySettings.enabled);
+
+                xRaySettings.oreESP = xray.value("oreESP", xRaySettings.oreESP);
+
+                xRaySettings.diamond = xray.value("diamond", xRaySettings.diamond);
+
+                xRaySettings.ancientDebris = xray.value("ancientDebris", xRaySettings.ancientDebris);
+
+                xRaySettings.emerald = xray.value("emerald", xRaySettings.emerald);
+
+                xRaySettings.gold = xray.value("gold", xRaySettings.gold);
+
+                xRaySettings.iron = xray.value("iron", xRaySettings.iron);
+
+                xRaySettings.copper = xray.value("copper", xRaySettings.copper);
+
+                xRaySettings.coal = xray.value("coal", xRaySettings.coal);
+
+                xRaySettings.lapis = xray.value("lapis", xRaySettings.lapis);
+
+                xRaySettings.redstone = xray.value("redstone", xRaySettings.redstone);
+
+                //
+                // ============================================================
+                // ORE APPEARANCE
+                // ============================================================
+                //
+
+                xRaySettings.oreRange = xray.value("oreRange", xRaySettings.oreRange);
+
+                xRaySettings.oreOpacity = xray.value("oreOpacity", xRaySettings.oreOpacity);
+
+                xRaySettings.oreBrightness = xray.value("oreBrightness", xRaySettings.oreBrightness);
+
+                //
+                // Backward compatibility:
+                //
+                // Older Nexus configs had one shared "outline" and "fill"
+                // setting. Use those as fallbacks the first time the new
+                // independent settings are loaded.
+                //
+
+                bool legacyOutline = xray.value("outline", true);
+
+                bool legacyFill = xray.value("fill", true);
+
+                xRaySettings.oreOutline = xray.value("oreOutline", legacyOutline);
+
+                xRaySettings.oreFill = xray.value("oreFill", legacyFill);
+
+                //
+                // ============================================================
+                // CAVE ESP
+                // ============================================================
+                //
+
+                xRaySettings.caveESP = xray.value("caveESP", xRaySettings.caveESP);
+
+                xRaySettings.airCheck3x3x3 = xray.value("airCheck3x3x3", xRaySettings.airCheck3x3x3);
+
+                xRaySettings.ignoreSurface = xray.value("ignoreSurface", xRaySettings.ignoreSurface);
+
+                //
+                // Cave range / appearance
+                //
+
+                xRaySettings.scanRange = xray.value("scanRange", xRaySettings.scanRange);
+
+                xRaySettings.caveOpacity = xray.value("caveOpacity", xRaySettings.caveOpacity);
+
+                xRaySettings.caveBrightness = xray.value("caveBrightness", xRaySettings.caveBrightness);
+
+                xRaySettings.caveOutlineOpacity = xray.value("caveOutlineOpacity", xRaySettings.caveOutlineOpacity);
+
+                xRaySettings.caveColorR = xray.value("caveColorR", xRaySettings.caveColorR);
+
+                xRaySettings.caveColorG = xray.value("caveColorG", xRaySettings.caveColorG);
+
+                xRaySettings.caveColorB = xray.value("caveColorB", xRaySettings.caveColorB);
+
+                xRaySettings.caveOutline = xray.value("caveOutline", legacyOutline);
+
+                xRaySettings.caveFill = xray.value("caveFill", legacyFill);
+
+                //
+                // ============================================================
+                // CLAMP LOADED VALUES
+                // ============================================================
+                //
+
+                xRaySettings.oreRange = std::clamp(xRaySettings.oreRange, 16, 128);
+
+                xRaySettings.oreOpacity = std::clamp(xRaySettings.oreOpacity, 5, 100);
+
+                xRaySettings.oreBrightness = std::clamp(xRaySettings.oreBrightness, 10, 150);
+
+                xRaySettings.scanRange = std::clamp(xRaySettings.scanRange, 16, 128);
+
+                xRaySettings.caveOpacity = std::clamp(xRaySettings.caveOpacity, 5, 100);
+
+                xRaySettings.caveBrightness = std::clamp(xRaySettings.caveBrightness, 10, 150);
+
+                xRaySettings.caveOutlineOpacity = std::clamp(xRaySettings.caveOutlineOpacity, 5, 100);
+
+                xRaySettings.caveColorR = std::clamp(xRaySettings.caveColorR, 0, 255);
+
+                xRaySettings.caveColorG = std::clamp(xRaySettings.caveColorG, 0, 255);
+
+                xRaySettings.caveColorB = std::clamp(xRaySettings.caveColorB, 0, 255);
+            }
+        } catch (...) {
+            menuKey = 'N';
+            viewMode = NexusViewMode::List;
+            favoriteOrder.clear();
+            xRaySettings = XRaySettings {};
+            save();
+        }
+    }
+
+    void NexusConfig::save() {
+        loaded = true;
+
+        const auto path = getConfigPath();
+
+        std::error_code ec;
+        std::filesystem::create_directories(path.parent_path(), ec);
+
+        nlohmann::json json;
+
+        json["version"] = 3;
+        json["menuKey"] = menuKey;
+
+        switch (viewMode) {
+        case NexusViewMode::Medium:
+            json["viewMode"] = "medium";
+            break;
+
+        case NexusViewMode::Compact:
+            json["viewMode"] = "compact";
+            break;
+
+        case NexusViewMode::List:
+        default:
+            json["viewMode"] = "list";
+            break;
+        }
+
+        sanitizeFavoriteOrder();
+
+        json["favoriteOrder"] = favoriteOrder;
+
+        json["xray"] = { //
+                         // Master
+                         //
+                         { "enabled", xRaySettings.enabled },
+
+                         //
+                         // Ore ESP
+                         //
+                         { "oreESP", xRaySettings.oreESP },
+
+                         { "diamond", xRaySettings.diamond },
+                         { "ancientDebris", xRaySettings.ancientDebris },
+                         { "emerald", xRaySettings.emerald },
+                         { "gold", xRaySettings.gold },
+                         { "iron", xRaySettings.iron },
+                         { "copper", xRaySettings.copper },
+                         { "coal", xRaySettings.coal },
+                         { "lapis", xRaySettings.lapis },
+                         { "redstone", xRaySettings.redstone },
+
+                         //
+                         // Ore appearance
+                         //
+                         { "oreRange", xRaySettings.oreRange },
+                         { "oreOpacity", xRaySettings.oreOpacity },
+                         { "oreBrightness", xRaySettings.oreBrightness },
+
+                         { "oreOutline", xRaySettings.oreOutline },
+                         { "oreFill", xRaySettings.oreFill },
+
+                         //
+                         // Cave ESP
+                         //
+                         { "caveESP", xRaySettings.caveESP },
+                         { "airCheck3x3x3", xRaySettings.airCheck3x3x3 },
+                         { "ignoreSurface", xRaySettings.ignoreSurface },
+
+                         //
+                         // Cave appearance
+                         //
+                         { "scanRange", xRaySettings.scanRange },
+                         { "caveOpacity", xRaySettings.caveOpacity },
+                         { "caveBrightness", xRaySettings.caveBrightness },
+                         { "caveOutlineOpacity", xRaySettings.caveOutlineOpacity },
+
+                         { "caveColorR", xRaySettings.caveColorR },
+                         { "caveColorG", xRaySettings.caveColorG },
+                         { "caveColorB", xRaySettings.caveColorB },
+
+                         { "caveOutline", xRaySettings.caveOutline },
+                         { "caveFill", xRaySettings.caveFill }
+        };
+
+        std::ofstream file(path);
+
+        if (!file.is_open()) return;
+
+        file << json.dump(4);
+    }
+
+    bool NexusConfig::isFavorite(const std::string& moduleId) {
+        load();
+
+        return std::find(favoriteOrder.begin(), favoriteOrder.end(), moduleId) != favoriteOrder.end();
+    }
+
+    void NexusConfig::setFavorite(const std::string& moduleId, bool favorite) {
+        load();
+
+        const auto* module = NexusModuleRegistry::find(moduleId);
+
+        if (module == nullptr || !module->canFavorite) {
+            return;
+        }
+
+        auto it = std::find(favoriteOrder.begin(), favoriteOrder.end(), moduleId);
+
+        if (favorite) {
+            if (it == favoriteOrder.end()) {
+                favoriteOrder.push_back(moduleId);
+            }
+        } else {
+            if (it != favoriteOrder.end()) {
+                favoriteOrder.erase(it);
+            }
+        }
+
+        save();
+    }
+
+    void NexusConfig::moveFavorite(const std::string& moduleId, std::size_t newIndex) {
+        load();
+
+        auto it = std::find(favoriteOrder.begin(), favoriteOrder.end(), moduleId);
+
+        if (it == favoriteOrder.end()) {
+            return;
+        }
+
+        std::string id = *it;
+
+        favoriteOrder.erase(it);
+
+        newIndex = std::min(newIndex, favoriteOrder.size());
+
+        favoriteOrder.insert(favoriteOrder.begin() + newIndex, id);
+
+        save();
+    }
+
+    const std::vector<std::string>& NexusConfig::getFavoriteOrder() {
+        load();
+        return favoriteOrder;
+    }
+
+    void NexusConfig::sanitizeFavoriteOrder() {
+        std::vector<std::string> cleaned;
+
+        for (const auto& id : favoriteOrder) {
+            const auto* module = NexusModuleRegistry::find(id);
+
+            if (module == nullptr || !module->canFavorite) {
+                continue;
+            }
+
+            if (std::find(cleaned.begin(), cleaned.end(), id) != cleaned.end()) {
+                continue;
+            }
+
+            cleaned.push_back(id);
+        }
+
+        favoriteOrder = std::move(cleaned);
+    }
+
+} // namespace Nexus
+
+#include "pch.h"
+
+#include "XRayScreen.h"
+#include "NexusScreen.h"
+
+#include "client/feature/nexus/ui/NexusControls.h"
+#include "client/feature/nexus/NexusConfig.h"
+#include "client/feature/nexus/xray/XRaySettings.h"
+#include "client/feature/nexus/navigation/NexusNavigation.h"
+
+#include "client/event/Eventing.h"
+#include "client/event/events/RenderOverlayEvent.h"
+
+#include "client/Latite.h"
+#include "client/screen/ScreenManager.h"
+
+#include "util/DrawContext.h"
+
+#include <algorithm>
+#include <string>
+#include <utility>
+
+XRayScreen::XRayScreen() {
+    Eventing::get().listen<RenderOverlayEvent>(this, (EventListenerFunc)&XRayScreen::onRender, 1, true);
+}
+
+void XRayScreen::onEnable(bool) {
+    resetInputState();
+}
+
+void XRayScreen::onDisable() {
+    Nexus::NexusConfig::save();
+
+    resetInputState();
+}
+
+void XRayScreen::onRender(Event&) {
+    if (!isActive()) {
+        return;
+    }
+
+    using namespace Nexus;
+
+    auto clientInstance = SDK::ClientInstance::get();
+
+    if (!clientInstance) {
+        return;
+    }
+
+    D2DUtil dc;
+
+    auto screenSize = Latite::getRenderer().getScreenSize();
+
+    auto& cursorPos = clientInstance->cursorPos;
+
+    cursor = Cursor::Arrow;
+
+    //
+    // ============================================================
+    // LAYOUT
+    // ============================================================
+    //
+
+    float scale = std::clamp(screenSize.width / 1920.0f, 0.72f, 1.10f);
+
+    float panelWidth = std::min(screenSize.width * 0.78f, 900.0f * scale);
+
+    float panelHeight = std::min(screenSize.height * 0.90f, 820.0f * scale);
+
+    d2d::Rect panelRect = { (screenSize.width - panelWidth) * 0.5f, (screenSize.height - panelHeight) * 0.5f,
+                            (screenSize.width + panelWidth) * 0.5f, (screenSize.height + panelHeight) * 0.5f };
+
+    float padding = 28.0f * scale;
+
+    //
+    // ============================================================
+    // STABLE PANEL
+    // ============================================================
+    //
+
+    dc.fillRoundedRectangle(panelRect, d2d::Color::RGB(0x0B, 0x0B, 0x0B).asAlpha(0.94f), 18.0f * scale);
+
+    dc.drawRoundedRectangle(panelRect, d2d::Color::RGB(0x45, 0x45, 0x45).asAlpha(0.75f), 18.0f * scale, 1.5f * scale);
+
+    //
+    // ============================================================
+    // TITLE
+    // ============================================================
+    //
+
+    d2d::Rect titleRect = { panelRect.left + padding, panelRect.top + 10.0f * scale, panelRect.right - padding,
+                            panelRect.top + 50.0f * scale };
+
+    dc.drawText(titleRect, L"X-Ray", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryLight, 28.0f * scale,
+                DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // Subtitle.
+    //
+
+    d2d::Rect subtitleRect = { panelRect.left + padding, panelRect.top + 43.0f * scale, panelRect.right - padding,
+                               panelRect.top + 67.0f * scale };
+
+    dc.drawText(subtitleRect, L"Ore ESP and Cave ESP", d2d::Color::RGB(0xA0, 0xA0, 0xA0).asAlpha(0.80f),
+                Renderer::FontSelection::PrimaryRegular, 13.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // ============================================================
+    // CONTROL HELPERS
+    // ============================================================
+    //
+
+    auto drawDisabledOverlay = [&](const d2d::Rect& rowRect) {
+        dc.fillRoundedRectangle(rowRect, d2d::Color::RGB(0x08, 0x08, 0x08).asAlpha(0.48f), 8.0f * scale);
+    };
+
+    //
+    // Toggle.
+    //
+
+    auto drawToggle = [&](const d2d::Rect& rowRect, const std::wstring& label, bool& value, bool enabled = true) {
+        bool hovering = enabled && shouldSelect(rowRect, cursorPos);
+
+        if (hovering) {
+            cursor = Cursor::Hand;
+        }
+
+        bool changed = Nexus::UI::drawToggle(dc, rowRect, label, value, hovering, enabled && justClicked[0], scale);
+
+        if (!enabled) {
+            drawDisabledOverlay(rowRect);
+        }
+
+        if (changed) {
+            playClickSound();
+        }
+
+        return changed;
+    };
+
+    //
+    // Integer slider.
+    //
+
+    auto drawSlider = [&](const d2d::Rect& rowRect, const std::wstring& label, int& value, int minimum, int maximum,
+                          int step, bool percent, bool enabled = true) {
+        d2d::Rect interactionRect = { rowRect.left + 150.0f * scale, rowRect.top, rowRect.right - 72.0f * scale,
+                                      rowRect.bottom };
+
+        bool hovering = enabled && shouldSelect(interactionRect, cursorPos);
+
+        if (hovering) {
+            cursor = Cursor::Hand;
+        }
+
+        Nexus::UI::drawSlider(dc, rowRect, label, value, minimum, maximum, step, percent, hovering,
+                              enabled && justClicked[0], enabled && mouseButtons[0], cursorPos.x, scale);
+
+        if (!enabled) {
+            drawDisabledOverlay(rowRect);
+        }
+    };
+
+    //
+    // Small section heading.
+    //
+
+    auto drawSectionLabel = [&](float x, float width, float y, const std::wstring& label, bool enabled) {
+        d2d::Rect labelRect = { x, y, x + width, y + 20.0f * scale };
+
+        d2d::Color color = enabled ? d2d::Color::RGB(0x9C, 0x9C, 0x9C) : d2d::Color::RGB(0x58, 0x58, 0x58);
+
+        dc.drawText(labelRect, label, color, Renderer::FontSelection::PrimaryRegular, 11.0f * scale,
+                    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    };
+
+    //
+    // ============================================================
+    // MASTER X-RAY
+    // ============================================================
+    //
+
+    float rowHeight = 32.0f * scale;
+
+    float rowGap = 5.0f * scale;
+
+    float masterTop = panelRect.top + 76.0f * scale;
+
+    d2d::Rect masterRect = { panelRect.left + padding, masterTop, panelRect.right - padding, masterTop + rowHeight };
+
+    drawToggle(masterRect, L"Master X-Ray", xRaySettings.enabled);
+
+    //
+    // Parent availability.
+    //
+
+    bool xrayAvailable = xRaySettings.enabled;
+
+    bool oresAvailable = xrayAvailable && xRaySettings.oreESP;
+
+    bool cavesAvailable = xrayAvailable && xRaySettings.caveESP;
+
+    //
+    // ============================================================
+    // TWO-COLUMN LAYOUT
+    // ============================================================
+    //
+
+    float columnGap = 22.0f * scale;
+
+    float columnTop = masterRect.bottom + 40.0f * scale;
+
+    float usableWidth = panelRect.getWidth() - padding * 2.0f;
+
+    float columnWidth = (usableWidth - columnGap) * 0.5f;
+
+    float leftX = panelRect.left + padding;
+
+    float rightX = leftX + columnWidth + columnGap;
+
+    //
+    // ============================================================
+    // MAIN HEADERS
+    // ============================================================
+    //
+
+    d2d::Rect oresHeader = { leftX, columnTop - 28.0f * scale, leftX + columnWidth, columnTop - 4.0f * scale };
+
+    dc.drawText(oresHeader, L"ORE ESP",
+                xrayAvailable ? d2d::Color::RGB(0xB8, 0xB8, 0xB8) : d2d::Color::RGB(0x62, 0x62, 0x62),
+                Renderer::FontSelection::PrimaryRegular, 13.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    d2d::Rect caveHeader = { rightX, columnTop - 28.0f * scale, rightX + columnWidth, columnTop - 4.0f * scale };
+
+    dc.drawText(caveHeader, L"CAVE ESP",
+                xrayAvailable ? d2d::Color::RGB(0xB8, 0xB8, 0xB8) : d2d::Color::RGB(0x62, 0x62, 0x62),
+                Renderer::FontSelection::PrimaryRegular, 13.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // ============================================================
+    // LEFT COLUMN — ORE ESP
+    // ============================================================
+    //
+
+    float leftY = columnTop;
+
+    auto nextLeftRow = [&]() {
+        d2d::Rect rect = { leftX, leftY, leftX + columnWidth, leftY + rowHeight };
+
+        leftY += rowHeight + rowGap;
+
+        return rect;
+    };
+
+    auto nextOrePairRow = [&]() {
+        float pairGap = 8.0f * scale;
+
+        float halfWidth = (columnWidth - pairGap) * 0.5f;
+
+        d2d::Rect first = { leftX, leftY, leftX + halfWidth, leftY + rowHeight };
+
+        d2d::Rect second = { first.right + pairGap, leftY, leftX + columnWidth, leftY + rowHeight };
+
+        leftY += rowHeight + rowGap;
+
+        return std::pair<d2d::Rect, d2d::Rect> { first, second };
+    };
+
+    //
+    // Ore master.
+    //
+
+    drawToggle(nextLeftRow(), L"Ore ESP", xRaySettings.oreESP, xrayAvailable);
+
+    //
+    // ------------------------------------------------------------
+    // ORE TYPES
+    // ------------------------------------------------------------
+    //
+
+    leftY += 7.0f * scale;
+
+    drawSectionLabel(leftX, columnWidth, leftY, L"ORE TYPES", oresAvailable);
+
+    leftY += 23.0f * scale;
+
+    //
+    // Rare Overworld ores.
+    //
+
+    {
+        auto [first, second] = nextOrePairRow();
+
+        drawToggle(first, L"Diamond", xRaySettings.diamond, oresAvailable);
+
+        drawToggle(second, L"Emerald", xRaySettings.emerald, oresAvailable);
+    }
+
+    //
+    // Nether / valuable ores.
+    //
+
+    {
+        auto [first, second] = nextOrePairRow();
+
+        drawToggle(first, L"Ancient Debris", xRaySettings.ancientDebris, oresAvailable);
+
+        drawToggle(second, L"Gold", xRaySettings.gold, oresAvailable);
+    }
+
+    //
+    // Common metals.
+    //
+
+    {
+        auto [first, second] = nextOrePairRow();
+
+        drawToggle(first, L"Iron", xRaySettings.iron, oresAvailable);
+
+        drawToggle(second, L"Copper", xRaySettings.copper, oresAvailable);
+    }
+
+    //
+    // Utility ores.
+    //
+
+    {
+        auto [first, second] = nextOrePairRow();
+
+        drawToggle(first, L"Redstone", xRaySettings.redstone, oresAvailable);
+
+        drawToggle(second, L"Lapis", xRaySettings.lapis, oresAvailable);
+    }
+
+    //
+    // Basic resource.
+    //
+
+    {
+        auto [first, second] = nextOrePairRow();
+
+        drawToggle(first, L"Coal", xRaySettings.coal, oresAvailable);
+
+        (void)second;
+    }
+    //
+    // ------------------------------------------------------------
+    // ORE APPEARANCE
+    // ------------------------------------------------------------
+    //
+
+    leftY += 7.0f * scale;
+
+    drawSectionLabel(leftX, columnWidth, leftY, L"APPEARANCE", oresAvailable);
+
+    leftY += 23.0f * scale;
+
+    drawSlider(nextLeftRow(), L"Range", xRaySettings.oreRange, 16, 128, 8, false, oresAvailable);
+
+    drawSlider(nextLeftRow(), L"Opacity", xRaySettings.oreOpacity, 5, 100, 5, true, oresAvailable);
+
+    drawSlider(nextLeftRow(), L"Brightness", xRaySettings.oreBrightness, 10, 150, 5, true, oresAvailable);
+
+    drawToggle(nextLeftRow(), L"Outline", xRaySettings.oreOutline, oresAvailable);
+
+    drawToggle(nextLeftRow(), L"Transparent Fill", xRaySettings.oreFill, oresAvailable);
+
+    //
+    // ============================================================
+    // RIGHT COLUMN — CAVE ESP
+    // ============================================================
+    //
+
+    float rightY = columnTop;
+
+    auto nextRightRow = [&]() {
+        d2d::Rect rect = { rightX, rightY, rightX + columnWidth, rightY + rowHeight };
+
+        rightY += rowHeight + rowGap;
+
+        return rect;
+    };
+
+    //
+    // Cave master.
+    //
+
+    drawToggle(nextRightRow(), L"Cave ESP", xRaySettings.caveESP, xrayAvailable);
+
+    //
+    // ------------------------------------------------------------
+    // DETECTION
+    // ------------------------------------------------------------
+    //
+
+    rightY += 7.0f * scale;
+
+    drawSectionLabel(rightX, columnWidth, rightY, L"DETECTION", cavesAvailable);
+
+    rightY += 23.0f * scale;
+
+    drawToggle(nextRightRow(), L"3x3x3 Open-Space Check", xRaySettings.airCheck3x3x3, cavesAvailable);
+
+    drawToggle(nextRightRow(), L"Ignore Surface Openings", xRaySettings.ignoreSurface, cavesAvailable);
+
+    //
+    // ------------------------------------------------------------
+    // CAVE APPEARANCE
+    // ------------------------------------------------------------
+    //
+
+    rightY += 7.0f * scale;
+
+    drawSectionLabel(rightX, columnWidth, rightY, L"APPEARANCE", cavesAvailable);
+
+    rightY += 23.0f * scale;
+
+    drawSlider(nextRightRow(), L"Range", xRaySettings.scanRange, 16, 128, 8, false, cavesAvailable);
+
+    drawSlider(nextRightRow(), L"Opacity", xRaySettings.caveOpacity, 5, 100, 5, true, cavesAvailable);
+
+    drawSlider(nextRightRow(), L"Brightness", xRaySettings.caveBrightness, 10, 150, 5, true, cavesAvailable);
+
+    drawSlider(nextRightRow(), L"Outline Opacity", xRaySettings.caveOutlineOpacity, 5, 100, 5, true, cavesAvailable);
+
+    //
+    // ------------------------------------------------------------
+    // CAVE COLOR
+    // ------------------------------------------------------------
+    //
+
+    rightY += 7.0f * scale;
+
+    drawSectionLabel(rightX, columnWidth, rightY, L"COLOR", cavesAvailable);
+
+    rightY += 23.0f * scale;
+
+    drawSlider(nextRightRow(), L"Red", xRaySettings.caveColorR, 0, 255, 1, false, cavesAvailable);
+
+    drawSlider(nextRightRow(), L"Green", xRaySettings.caveColorG, 0, 255, 1, false, cavesAvailable);
+
+    drawSlider(nextRightRow(), L"Blue", xRaySettings.caveColorB, 0, 255, 1, false, cavesAvailable);
+
+    //
+    // ------------------------------------------------------------
+    // CAVE DISPLAY
+    // ------------------------------------------------------------
+    //
+
+    rightY += 7.0f * scale;
+
+    drawSectionLabel(rightX, columnWidth, rightY, L"DISPLAY", cavesAvailable);
+
+    rightY += 23.0f * scale;
+
+    drawToggle(nextRightRow(), L"Outline", xRaySettings.caveOutline, cavesAvailable);
+
+    drawToggle(nextRightRow(), L"Transparent Fill", xRaySettings.caveFill, cavesAvailable);
+
+    //
+    // ============================================================
+    // BACK BUTTON
+    // ============================================================
+    //
+
+    d2d::Rect backRect = { panelRect.left + padding, panelRect.bottom - 58.0f * scale,
+                           panelRect.left + padding + 130.0f * scale, panelRect.bottom - 18.0f * scale };
+
+    bool hoveringBack = shouldSelect(backRect, cursorPos);
+
+    if (hoveringBack) {
+        cursor = Cursor::Hand;
+    }
+
+    d2d::Color backColor = hoveringBack ? d2d::Color::RGB(0x35, 0x35, 0x35) : d2d::Color::RGB(0x20, 0x20, 0x20);
+
+    dc.fillRoundedRectangle(backRect, backColor, 10.0f * scale);
+
+    dc.drawRoundedRectangle(backRect, d2d::Color::RGB(0x55, 0x55, 0x55), 10.0f * scale, 1.0f * scale);
+
+    dc.drawText(backRect, L"< Back", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular, 16.0f * scale,
+                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // ============================================================
+    // RESET DEFAULTS
+    // ============================================================
+    //
+
+    d2d::Rect resetRect = { backRect.right + 12.0f * scale, backRect.top, backRect.right + 182.0f * scale,
+                            backRect.bottom };
+
+    bool hoveringReset = shouldSelect(resetRect, cursorPos);
+
+    if (hoveringReset) {
+        cursor = Cursor::Hand;
+    }
+
+    d2d::Color resetColor = hoveringReset ? d2d::Color::RGB(0x42, 0x2A, 0x2A) : d2d::Color::RGB(0x28, 0x20, 0x20);
+
+    dc.fillRoundedRectangle(resetRect, resetColor, 10.0f * scale);
+
+    dc.drawRoundedRectangle(resetRect, d2d::Color::RGB(0x70, 0x4A, 0x4A), 10.0f * scale, 1.0f * scale);
+
+    dc.drawText(resetRect, L"Reset Defaults", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
+                15.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // ============================================================
+    // VERSION
+    // ============================================================
+    //
+
+    d2d::Rect versionRect = { panelRect.right - 250.0f * scale, panelRect.bottom - 48.0f * scale,
+                              panelRect.right - padding, panelRect.bottom - 18.0f * scale };
+
+    dc.drawText(versionRect, L"X-Ray v0.1", d2d::Color::RGB(0x90, 0x90, 0x90), Renderer::FontSelection::PrimaryRegular,
+                12.0f * scale, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // ============================================================
+    // BUTTON ACTIONS
+    // ============================================================
+    //
+
+    if (hoveringReset && justClicked[0]) {
+        playClickSound();
+
+        Nexus::xRaySettings = Nexus::XRaySettings {};
+
+        Nexus::NexusConfig::save();
+
+        return;
+    }
+
+    if (hoveringBack && justClicked[0]) {
+        playClickSound();
+
+        Nexus::NexusNavigation::backToHub();
+
+        return;
+    }
+}
+
+#pragma once
+
+#include "NexusModuleInfo.h"
+
+#include <vector>
+
+namespace Nexus {
+
+    class NexusModuleRegistry {
+    public:
+        static void initialize();
+
+        static const std::vector<NexusModuleInfo>& getModules();
+
+        static const NexusModuleInfo* find(const std::string& id);
+
+    private:
+        inline static bool initialized = false;
+
+        inline static std::vector<NexusModuleInfo> modules {};
+    };
+
+} // namespace Nexus
+
+#include "pch.h"
+#include "NexusModuleRegistry.h"
+
+namespace Nexus {
+
+    void NexusModuleRegistry::initialize() {
+        if (initialized) return;
+        initialized = true;
+
+        modules = {
+            { "xray", L"X-Ray", L"Highlight ores and underground paths.", NexusCategory::World,
+              NexusModulePolicy::ServerGoverned },
+
+            { "light_levels", L"Light Levels", L"Visualize block light levels.", NexusCategory::World,
+              NexusModulePolicy::ClientOnly },
+
+            { "dynamic_light", L"Dynamic Light", L"Make held light-emitting items illuminate the area around you.",
+              NexusCategory::World, NexusModulePolicy::ClientOnly },
+
+            { "build_guide", L"BuildGuide", L"Render shapes and construction guides.", NexusCategory::Building,
+              NexusModulePolicy::ClientOnly },
+
+            { "armor_hud", L"Armor HUD", L"Display equipped armor and durability.", NexusCategory::HUD,
+              NexusModulePolicy::ClientOnly },
+
+            { "block_break_hud", L"Block Break HUD", L"Show the block being mined and its break progress.",
+              NexusCategory::HUD, NexusModulePolicy::ClientOnly },
+
+            { "animal_feeder", L"Animal Feeder", L"Assist with nearby animal feeding and breeding.",
+              NexusCategory::Entities, NexusModulePolicy::ClientOnly },
+
+            { "animal_timers", L"Animal Timers", L"Show nearby breeding and growth timers.", NexusCategory::Entities,
+              NexusModulePolicy::ClientOnly },
+
+            { "chest_tools", L"Chest Tools", L"Sorting and utility tools for opened containers.",
+              NexusCategory::Inventory, NexusModulePolicy::ClientOnly },
+
+            { "map", L"Map", L"View explored terrain, waypoints, and player position.", NexusCategory::World,
+              NexusModulePolicy::ClientOnly },
+        };
+    }
+
+    const std::vector<NexusModuleInfo>& NexusModuleRegistry::getModules() {
+        initialize();
+        return modules;
+    }
+
+    const NexusModuleInfo* NexusModuleRegistry::find(const std::string& id) {
+        initialize();
+
+        for (const auto& module : modules) {
+            if (module.id == id) {
+                return &module;
+            }
+        }
+
+        return nullptr;
+    }
+
+} // namespace Nexus
+
+#pragma once
+
+#include <string>
+
+namespace Nexus {
+
+    enum class NexusCategory {
+        World,
+        HUD,
+        Building,
+        Inventory,
+        Entities,
+        Utility,
+        Gameplay,
+        Administration
+    };
+
+    enum class NexusModulePolicy {
+        ClientOnly,
+        ServerGoverned,
+        ServerRequired
+    };
+
+    struct NexusModuleInfo {
+        std::string id;
+
+        std::wstring name;
+        std::wstring description;
+
+        NexusCategory category;
+        NexusModulePolicy policy;
+
+        bool canFavorite = true;
+    };
+
+} // namespace Nexus
+
+#pragma once
+
+#include "client/Latite.h"
+#include "client/screen/ScreenManager.h"
+#include "client/screen/screens/NexusScreen.h"
+
+namespace Nexus {
+
+    class NexusNavigation final {
+    public:
+        template<typename T>
+        static void openSubmenu(NexusScreen& source) {
+            source.prepareForSubmenu();
+
+            Latite::getScreenManager().showScreen<T>();
+        }
+
+        static void backToHub() { Latite::getScreenManager().showScreen<NexusScreen>(true); }
+
+        static void closeToGame() { Latite::getScreenManager().exitCurrentScreen(); }
+    };
+
+} // namespace Nexus
+
+#pragma once
+
+#include "util/DrawContext.h"
+
+#include <string>
+
+namespace Nexus::UI {
+
+    bool drawToggle(D2DUtil& dc, const d2d::Rect& rowRect, const std::wstring& label, bool& value, bool hovering,
+                    bool clicked, float scale);
+
+    bool drawSlider(D2DUtil& dc, const d2d::Rect& rowRect, const std::wstring& label, int& value, int minimum,
+                    int maximum, int step, bool percent, bool hovering, bool clicked, bool held, float cursorX,
+                    float scale);
+
+    bool drawSwitch(D2DUtil& dc, const d2d::Rect& switchRect, bool& value, bool hovering, bool clicked, float scale);
+
+} // namespace Nexus::UI
+
+#include "pch.h"
+#include "NexusControls.h"
+
+namespace Nexus::UI {
+
+    bool drawToggle(D2DUtil& dc, const d2d::Rect& rowRect, const std::wstring& label, bool& value, bool hovering,
+                    bool clicked, float scale) {
+        d2d::Color rowColor = hovering ? d2d::Color::RGB(0x25, 0x25, 0x25) : d2d::Color::RGB(0x17, 0x17, 0x17);
+
+        dc.fillRoundedRectangle(rowRect, rowColor, 8.0f * scale);
+
+        d2d::Rect labelRect = { rowRect.left + 12.0f * scale, rowRect.top, rowRect.right - 80.0f * scale,
+                                rowRect.bottom };
+
+        dc.drawText(labelRect, label, d2d::Color::RGB(0xE0, 0xE0, 0xE0), Renderer::FontSelection::PrimaryRegular,
+                    15.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        float switchWidth = 52.0f * scale;
+        float switchHeight = 24.0f * scale;
+
+        d2d::Rect switchRect = { rowRect.right - switchWidth - 10.0f * scale, rowRect.center().y - switchHeight * 0.5f,
+                                 rowRect.right - 10.0f * scale, rowRect.center().y + switchHeight * 0.5f };
+
+        d2d::Color switchColor = value ? d2d::Color::RGB(0x42, 0x78, 0xA8) : d2d::Color::RGB(0x42, 0x42, 0x42);
+
+        dc.fillRoundedRectangle(switchRect, switchColor, switchHeight * 0.5f);
+
+        float knobSize = 18.0f * scale;
+
+        float knobLeft = value ? switchRect.right - knobSize - 3.0f * scale : switchRect.left + 3.0f * scale;
+
+        d2d::Rect knobRect = { knobLeft, switchRect.center().y - knobSize * 0.5f, knobLeft + knobSize,
+                               switchRect.center().y + knobSize * 0.5f };
+
+        dc.fillRoundedRectangle(knobRect, d2d::Colors::WHITE, knobSize * 0.5f);
+
+        if (hovering && clicked) {
+            value = !value;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool drawSlider(D2DUtil& dc, const d2d::Rect& rowRect, const std::wstring& label, int& value, int minimum,
+                    int maximum, int step, bool percent, bool hovering, bool clicked, bool held, float cursorX,
+                    float scale) {
+        dc.fillRoundedRectangle(rowRect, d2d::Color::RGB(0x17, 0x17, 0x17), 8.0f * scale);
+
+        std::wstring valueText = std::to_wstring(value);
+
+        if (percent) {
+            valueText += L"%";
+        }
+
+        d2d::Rect labelRect = { rowRect.left + 12.0f * scale, rowRect.top, rowRect.left + 145.0f * scale,
+                                rowRect.bottom };
+
+        dc.drawText(labelRect, label, d2d::Color::RGB(0xE0, 0xE0, 0xE0), Renderer::FontSelection::PrimaryRegular,
+                    15.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        d2d::Rect valueRect = { rowRect.right - 58.0f * scale, rowRect.top, rowRect.right - 10.0f * scale,
+                                rowRect.bottom };
+
+        dc.drawText(valueRect, valueText, d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular, 14.0f * scale,
+                    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        d2d::Rect trackRect = { rowRect.left + 150.0f * scale, rowRect.center().y - 3.0f * scale,
+                                rowRect.right - 72.0f * scale, rowRect.center().y + 3.0f * scale };
+
+        float normalized = static_cast<float>(value - minimum) / static_cast<float>(maximum - minimum);
+
+        normalized = std::clamp(normalized, 0.0f, 1.0f);
+
+        dc.fillRoundedRectangle(trackRect, d2d::Color::RGB(0x3A, 0x3A, 0x3A), 3.0f * scale);
+
+        d2d::Rect progressRect = { trackRect.left, trackRect.top, trackRect.left + trackRect.getWidth() * normalized,
+                                   trackRect.bottom };
+
+        dc.fillRoundedRectangle(progressRect, d2d::Color::RGB(0x42, 0x78, 0xA8), 3.0f * scale);
+
+        float knobX = trackRect.left + trackRect.getWidth() * normalized;
+
+        float knobRadius = 7.0f * scale;
+
+        d2d::Rect knobRect = { knobX - knobRadius, rowRect.center().y - knobRadius, knobX + knobRadius,
+                               rowRect.center().y + knobRadius };
+
+        dc.fillRoundedRectangle(knobRect, d2d::Colors::WHITE, knobRadius);
+
+        if (!hovering || (!clicked && !held)) {
+            return false;
+        }
+
+        float mouseNormalized = (cursorX - trackRect.left) / trackRect.getWidth();
+
+        mouseNormalized = std::clamp(mouseNormalized, 0.0f, 1.0f);
+
+        float rawValue = static_cast<float>(minimum) + mouseNormalized * static_cast<float>(maximum - minimum);
+
+        int steppedValue = static_cast<int>(std::round(rawValue / static_cast<float>(step))) * step;
+
+        int newValue = std::clamp(steppedValue, minimum, maximum);
+
+        if (newValue == value) {
+            return false;
+        }
+
+        value = newValue;
+        return true;
+    }
+
+    bool drawSwitch(D2DUtil& dc, const d2d::Rect& switchRect, bool& value, bool hovering, bool clicked, float scale) {
+        d2d::Color switchColor;
+
+        if (value) {
+            switchColor = hovering ? d2d::Color::RGB(0x4B, 0x86, 0xBA) : d2d::Color::RGB(0x42, 0x78, 0xA8);
+        } else {
+            switchColor = hovering ? d2d::Color::RGB(0x50, 0x50, 0x50) : d2d::Color::RGB(0x3C, 0x3C, 0x3C);
+        }
+
+        dc.fillRoundedRectangle(switchRect, switchColor, switchRect.getHeight() * 0.5f);
+
+        float knobSize = switchRect.getHeight() - 6.0f * scale;
+
+        float knobLeft = value ? switchRect.right - knobSize - 3.0f * scale : switchRect.left + 3.0f * scale;
+
+        d2d::Rect knobRect = { knobLeft, switchRect.center().y - knobSize * 0.5f, knobLeft + knobSize,
+                               switchRect.center().y + knobSize * 0.5f };
+
+        dc.fillRoundedRectangle(knobRect, d2d::Colors::WHITE, knobSize * 0.5f);
+
+        if (hovering && clicked) {
+            value = !value;
+            return true;
+        }
+
+        return false;
+    }
+
+} // namespace Nexus::UI
+
+#pragma once
+
+namespace Nexus {
+
+    struct XRaySettings {
+        //
+        // Master
+        //
+        bool enabled = true;
+
+        //
+        // Ore ESP
+        //
+        bool oreESP = true;
+
+        bool diamond = true;
+        bool ancientDebris = true;
+        bool emerald = true;
+        bool gold = true;
+        bool iron = false;
+        bool copper = false;
+        bool coal = false;
+        bool lapis = true;
+        bool redstone = true;
+
+        //
+        // Ore appearance / range
+        //
+        int oreRange = 64;
+        int oreOpacity = 80;
+        int oreBrightness = 100;
+
+        bool oreOutline = true;
+        bool oreFill = true;
+
+        //
+        // Cave ESP
+        //
+        bool caveESP = true;
+        bool airCheck3x3x3 = true;
+        bool ignoreSurface = true;
+
+        //
+        // Cave scan range
+        //
+        int scanRange = 64;
+
+        //
+        // Cave appearance
+        //
+        int caveOpacity = 25;
+        int caveBrightness = 80;
+        int caveOutlineOpacity = 70;
+
+        int caveColorR = 0xA9;
+        int caveColorG = 0x5C;
+        int caveColorB = 0xFF;
+
+        bool caveOutline = true;
+        bool caveFill = true;
+    };
+
+    inline XRaySettings xRaySettings {};
+
+} // namespace Nexus

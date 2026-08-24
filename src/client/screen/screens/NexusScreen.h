@@ -2,6 +2,8 @@
 
 #include "../Screen.h"
 #include "../TextBox.h"
+
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <unordered_map>
@@ -32,15 +34,41 @@ private:
     float lerpScroll = 0.0f;
     float scrollMax = 0.0f;
 
+    //
+    // ============================================================
+    // FAVORITE CLICK / HOLD / DRAG
+    // ============================================================
+    //
+
+    bool favoriteDragPending = false;
     bool draggingFavorite = false;
+
     std::string draggingFavoriteId {};
+
+    std::size_t draggingFavoriteOriginalIndex = 0;
     std::size_t dragTargetIndex = 0;
+
+    std::chrono::steady_clock::time_point favoritePressTime {};
+
+    float favoritePressX = 0.0f;
+    float favoritePressY = 0.0f;
 
     float dragOffsetX = 0.0f;
     float dragOffsetY = 0.0f;
 
+    //
+    // Position animation during drag reorder.
+    //
+
     std::unordered_map<std::string, float> favoriteAnimX {};
     std::unordered_map<std::string, float> favoriteAnimY {};
+
+
+    //
+    // Hover bloom.
+    //
+
+    std::unordered_map<std::string, float> moduleHoverAnim {};
 
     TextBox searchBox {};
 };
