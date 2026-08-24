@@ -70,5 +70,11 @@ private:
 
     std::unordered_map<std::string, float> moduleHoverAnim {};
 
+    //
+    // Main Nexus layout dropdown.
+    //
+
+    bool viewDropdownOpen = false;
+
     TextBox searchBox {};
 };

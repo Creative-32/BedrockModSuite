@@ -55,7 +55,7 @@ private:
     // Hold:
     //     begin dragging
     //
-    // The switch is excluded so it can still be clicked normally.
+    // Switch is excluded.
     //
 
     bool targetDragPending = false;

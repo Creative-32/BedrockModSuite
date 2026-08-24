@@ -5,8 +5,14 @@
 
 namespace Nexus {
 
-    enum class XRayBuiltInTarget : std::size_t {
-        Diamond = 0,
+    //
+    // ============================================================
+    // BUILT-IN X-RAY TARGETS
+    // ============================================================
+    //
+
+    enum class XRayBuiltInTarget {
+        Diamond,
         Emerald,
         AncientDebris,
         Gold,
@@ -19,27 +25,27 @@ namespace Nexus {
         Count
     };
 
+    inline constexpr std::size_t XRayBuiltInTargetCount = static_cast<std::size_t>(XRayBuiltInTarget::Count);
+
     struct XRayColor {
         int r = 255;
         int g = 255;
         int b = 255;
     };
 
-    inline constexpr std::size_t XRayBuiltInTargetCount = static_cast<std::size_t>(XRayBuiltInTarget::Count);
-
     struct XRaySettings {
         //
-        // ============================================================
+        // ========================================================
         // MASTER
-        // ============================================================
+        // ========================================================
         //
 
         bool enabled = true;
 
         //
-        // ============================================================
-        // ORE ESP
-        // ============================================================
+        // ========================================================
+        // ORE / BLOCK ESP
+        // ========================================================
         //
 
         bool oreESP = true;
@@ -57,9 +63,9 @@ namespace Nexus {
         bool redstone = true;
 
         //
-        // ============================================================
-        // ORE APPEARANCE / RANGE
-        // ============================================================
+        // ========================================================
+        // GLOBAL ORE APPEARANCE
+        // ========================================================
         //
 
         int oreRange = 64;
@@ -70,61 +76,29 @@ namespace Nexus {
         bool oreFill = true;
 
         //
-        // Individual built-in ore colors.
+        // ========================================================
+        // INDIVIDUAL TARGET COLORS
+        // ========================================================
         //
-        // These are deliberately stored independently from OreType so
-        // this data can later move into the generic XRayTarget system.
+        // Order MUST match XRayBuiltInTarget.
         //
 
-        std::array<XRayColor, XRayBuiltInTargetCount> oreColors { { //
-                                                                    // Diamond
-                                                                    //
-                                                                    { 0x42, 0xE6, 0xD5 },
-
-                                                                    //
-                                                                    // Emerald
-                                                                    //
-                                                                    { 0x35, 0xD0, 0x63 },
-
-                                                                    //
-                                                                    // Ancient Debris
-                                                                    //
-                                                                    { 0x9C, 0x64, 0x4B },
-
-                                                                    //
-                                                                    // Gold
-                                                                    //
-                                                                    { 0xF5, 0xD4, 0x42 },
-
-                                                                    //
-                                                                    // Iron
-                                                                    //
-                                                                    { 0xD8, 0xC5, 0xB0 },
-
-                                                                    //
-                                                                    // Copper
-                                                                    //
-                                                                    { 0xD7, 0x7A, 0x45 },
-
-                                                                    //
-                                                                    // Redstone
-                                                                    //
-                                                                    { 0xE0, 0x35, 0x35 },
-
-                                                                    //
-                                                                    // Lapis
-                                                                    //
-                                                                    { 0x38, 0x68, 0xD8 },
-
-                                                                    //
-                                                                    // Coal
-                                                                    //
-                                                                    { 0x70, 0x70, 0x70 } } };
+        std::array<XRayColor, XRayBuiltInTargetCount> oreColors {
+            XRayColor { 0x42, 0xE6, 0xD5 }, // Diamond
+            XRayColor { 0x35, 0xD0, 0x63 }, // Emerald
+            XRayColor { 0x9C, 0x64, 0x4B }, // Ancient Debris
+            XRayColor { 0xF5, 0xD4, 0x42 }, // Gold
+            XRayColor { 0xD8, 0xC5, 0xB0 }, // Iron
+            XRayColor { 0xD7, 0x7A, 0x45 }, // Copper
+            XRayColor { 0xE0, 0x35, 0x35 }, // Redstone
+            XRayColor { 0x38, 0x68, 0xD8 }, // Lapis
+            XRayColor { 0x70, 0x70, 0x70 }  // Coal
+        };
 
         //
-        // ============================================================
+        // ========================================================
         // CAVE ESP
-        // ============================================================
+        // ========================================================
         //
 
         bool caveESP = true;
@@ -133,13 +107,15 @@ namespace Nexus {
         bool ignoreSurface = true;
 
         //
-        // Cave range.
+        // Cave scan range.
         //
 
         int scanRange = 64;
 
         //
-        // Cave appearance.
+        // ========================================================
+        // CAVE APPEARANCE
+        // ========================================================
         //
 
         int caveOpacity = 25;

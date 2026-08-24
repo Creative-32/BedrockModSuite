@@ -69,6 +69,8 @@ void NexusScreen::onEnable(bool ignoreAnimations) {
 
     moduleHoverAnim.clear();
 
+    viewDropdownOpen = false;
+
     searchBox.setSelected(false);
 
     resetInputState();
@@ -97,6 +99,8 @@ void NexusScreen::onDisable() {
     favoriteAnimY.clear();
 
     moduleHoverAnim.clear();
+
+    viewDropdownOpen = false;
 
     searchBox.setSelected(false);
 
@@ -266,79 +270,214 @@ void NexusScreen::onRender(Event&) {
                 DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, false);
 
     //
-    // VIEW MODE
+    // ============================================================
+    // VIEW MODE DROPDOWN
+    // ============================================================
     //
 
-    float viewButtonHeight = 26.0f * scale;
+    float viewHeight = 26.0f * scale;
 
-    float viewGap = 6.0f * scale;
-
-    float compactWidth = 72.0f * scale;
-
-    float mediumWidth = 72.0f * scale;
-
-    float listWidth = 52.0f * scale;
+    float viewWidth = 150.0f * scale;
 
     float viewRight = panelRect.right - padding;
 
     float viewTop = panelRect.top + 49.0f * scale;
 
-    d2d::Rect compactViewRect = { viewRight - compactWidth, viewTop, viewRight, viewTop + viewButtonHeight };
+    d2d::Rect viewSelectorRect = { viewRight - viewWidth, viewTop, viewRight, viewTop + viewHeight };
 
-    d2d::Rect mediumViewRect = { compactViewRect.left - viewGap - mediumWidth, viewTop, compactViewRect.left - viewGap,
-                                 viewTop + viewButtonHeight };
+    float viewOptionHeight = 28.0f * scale;
 
-    d2d::Rect listViewRect = { mediumViewRect.left - viewGap - listWidth, viewTop, mediumViewRect.left - viewGap,
-                               viewTop + viewButtonHeight };
+    float viewOptionGap = 3.0f * scale;
 
-    auto drawViewButton = [&](const d2d::Rect& rect, const std::wstring& text, Nexus::NexusViewMode mode) {
-        bool selected = Nexus::NexusConfig::viewMode == mode;
+    float viewMenuTop = viewSelectorRect.bottom + 4.0f * scale;
 
-        bool hovering = isActive() && shouldSelect(rect, cursorPos);
+    d2d::Rect viewMenuRect = { viewSelectorRect.left, viewMenuTop, viewSelectorRect.right,
+                               viewMenuTop + viewOptionHeight * 3.0f + viewOptionGap * 2.0f };
 
-        if (hovering) {
-            cursor = Cursor::Hand;
+    d2d::Rect viewOptionRects[3];
+
+    for (int index = 0; index < 3; ++index) {
+        float optionTop = viewMenuTop + static_cast<float>(index) * (viewOptionHeight + viewOptionGap);
+
+        viewOptionRects[index] = { viewMenuRect.left, optionTop, viewMenuRect.right, optionTop + viewOptionHeight };
+    }
+
+    //
+    // Keep the old enum values internally.
+    //
+    // UI:
+    //
+    // List         -> NexusViewMode::List
+    // Grid         -> NexusViewMode::Medium
+    // Compact Grid -> NexusViewMode::Compact
+    //
+
+    const wchar_t* viewNames[3] = { L"List", L"Grid", L"Compact Grid" };
+
+    Nexus::NexusViewMode viewModes[3] = { Nexus::NexusViewMode::List, Nexus::NexusViewMode::Medium,
+                                          Nexus::NexusViewMode::Compact };
+
+    std::wstring currentViewName = L"List";
+
+    switch (Nexus::NexusConfig::viewMode) {
+    case Nexus::NexusViewMode::Medium:
+        currentViewName = L"Grid";
+        break;
+
+    case Nexus::NexusViewMode::Compact:
+        currentViewName = L"Compact Grid";
+        break;
+
+    case Nexus::NexusViewMode::List:
+    default:
+        currentViewName = L"List";
+        break;
+    }
+
+    bool viewDropdownConsumedClick = false;
+
+    bool viewSelectorHovered = isActive() && shouldSelect(viewSelectorRect, cursorPos);
+
+    if (viewSelectorHovered) {
+        cursor = Cursor::Hand;
+    }
+
+    d2d::Color viewBackground =
+        viewSelectorHovered ? d2d::Color::RGB(0x2D, 0x2D, 0x2D) : d2d::Color::RGB(0x20, 0x20, 0x20);
+
+    dc.fillRoundedRectangle(viewSelectorRect, viewBackground, 7.0f * scale);
+
+    dc.drawRoundedRectangle(viewSelectorRect,
+                            viewDropdownOpen ? d2d::Color::RGB(0x62, 0x92, 0xBC) : d2d::Color::RGB(0x48, 0x48, 0x48),
+                            7.0f * scale, viewDropdownOpen ? 1.5f * scale : 1.0f * scale);
+
+    //
+    // Current view name.
+    //
+
+    d2d::Rect viewTextRect = { viewSelectorRect.left + 10.0f * scale,
+
+                               viewSelectorRect.top,
+
+                               viewSelectorRect.right - 28.0f * scale,
+
+                               viewSelectorRect.bottom };
+
+    dc.drawText(viewTextRect, currentViewName, d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
+                11.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // Arrow.
+    //
+
+    d2d::Rect viewArrowRect = { viewSelectorRect.right - 28.0f * scale,
+
+                                viewSelectorRect.top,
+
+                                viewSelectorRect.right - 5.0f * scale,
+
+                                viewSelectorRect.bottom };
+
+    dc.drawText(viewArrowRect, viewDropdownOpen ? L"\u25B4" : L"\u25BE", d2d::Color::RGB(0xC8, 0xC8, 0xC8),
+                Renderer::FontSelection::PrimaryRegular, 11.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // ============================================================
+    // OPEN / CLOSE
+    // ============================================================
+    //
+
+    if (viewSelectorHovered && justClicked[0]) {
+        viewDropdownOpen = !viewDropdownOpen;
+
+        viewDropdownConsumedClick = true;
+
+        favoriteDragPending = false;
+
+        draggingFavorite = false;
+
+        draggingFavoriteId.clear();
+
+        draggingFavoriteOriginalIndex = 0;
+
+        dragTargetIndex = 0;
+
+        playClickSound();
+    }
+
+    //
+    // ============================================================
+    // OPTION INTERACTION
+    // ============================================================
+    //
+
+    if (viewDropdownOpen) {
+        for (int index = 0; index < 3; ++index) {
+            bool optionHovered = shouldSelect(viewOptionRects[index], cursorPos);
+
+            if (optionHovered) {
+                cursor = Cursor::Hand;
+            }
+
+            if (optionHovered && justClicked[0] && !viewDropdownConsumedClick) {
+                Nexus::NexusViewMode newMode = viewModes[index];
+
+                if (Nexus::NexusConfig::viewMode != newMode) {
+                    Nexus::NexusConfig::viewMode = newMode;
+
+                    Nexus::NexusConfig::save();
+
+                    scroll = 0.0f;
+
+                    lerpScroll = 0.0f;
+
+                    draggingFavorite = false;
+
+                    draggingFavoriteId.clear();
+
+                    dragTargetIndex = 0;
+
+                    favoriteAnimX.clear();
+                    favoriteAnimY.clear();
+
+                    playClickSound();
+                }
+
+                viewDropdownOpen = false;
+
+                viewDropdownConsumedClick = true;
+
+                break;
+            }
         }
 
-        d2d::Color background;
+        //
+        // Clicking anywhere outside the selector/menu closes it.
+        //
 
-        if (selected) {
-            background = d2d::Color::RGB(0x42, 0x78, 0xA8);
-        } else if (hovering) {
-            background = d2d::Color::RGB(0x32, 0x32, 0x32);
-        } else {
-            background = d2d::Color::RGB(0x20, 0x20, 0x20);
+        bool overViewMenu = shouldSelect(viewMenuRect, cursorPos);
+
+        if (justClicked[0] && !viewDropdownConsumedClick && !viewSelectorHovered && !overViewMenu) {
+            viewDropdownOpen = false;
+
+            //
+            // Consume this click so closing the menu doesn't also
+            // activate a module underneath it.
+            //
+
+            viewDropdownConsumedClick = true;
         }
+    }
 
-        dc.fillRoundedRectangle(rect, background, 7.0f * scale);
+    //
+    // This is used below to prevent the dropdown from clicking
+    // controls underneath it.
+    //
 
-        dc.drawText(rect, text, d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular, 11.0f * scale,
-                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    bool cursorOverViewMenu = viewDropdownOpen && shouldSelect(viewMenuRect, cursorPos);
 
-        if (hovering && justClicked[0] && !selected) {
-            Nexus::NexusConfig::viewMode = mode;
-
-            Nexus::NexusConfig::save();
-
-            scroll = 0.0f;
-            lerpScroll = 0.0f;
-
-            draggingFavorite = false;
-            draggingFavoriteId.clear();
-            dragTargetIndex = 0;
-
-            favoriteAnimX.clear();
-            favoriteAnimY.clear();
-
-            playClickSound();
-        }
-    };
-
-    drawViewButton(listViewRect, L"List", Nexus::NexusViewMode::List);
-
-    drawViewButton(mediumViewRect, L"Medium", Nexus::NexusViewMode::Medium);
-
-    drawViewButton(compactViewRect, L"Compact", Nexus::NexusViewMode::Compact);
+    bool blockPageInput = viewDropdownConsumedClick || cursorOverViewMenu;
 
     //
     // SUBTITLE
@@ -370,12 +509,12 @@ void NexusScreen::onRender(Event&) {
 
     searchBox.setRect(searchTextRect);
 
-    bool searchHovered = isActive() && shouldSelect(searchRect, cursorPos);
+    bool searchHovered = isActive() && !blockPageInput && shouldSelect(searchRect, cursorPos);
 
     d2d::Rect clearRect = { searchRect.right - 28.0f * scale, searchRect.top + 4.0f * scale,
                             searchRect.right - 6.0f * scale, searchRect.bottom - 4.0f * scale };
 
-    bool clearHovered = hasSearchText && isActive() && shouldSelect(clearRect, cursorPos);
+    bool clearHovered = hasSearchText && isActive() && !blockPageInput && shouldSelect(clearRect, cursorPos);
 
     if (clearHovered) {
         cursor = Cursor::Hand;
@@ -383,7 +522,7 @@ void NexusScreen::onRender(Event&) {
         cursor = Cursor::IBeam;
     }
 
-    if (justClicked[0]) {
+    if (justClicked[0] && !blockPageInput) {
         if (clearHovered) {
             searchBox.reset();
             searchBox.setSelected(true);
@@ -810,7 +949,7 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
             return;
         }
 
-        bool cursorInsideList = listRect.contains(cursorPos);
+        bool cursorInsideList = !blockPageInput && listRect.contains(cursorPos);
 
         bool tileHovered = isActive() && cursorInsideList && shouldSelect(tileRect, cursorPos);
 
@@ -1141,7 +1280,9 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
     dc.ctx->PopAxisAlignedClip();
 
     //
+    // ============================================================
     // SCROLLBAR
+    // ============================================================
     //
 
     if (scrollMax > 0.0f) {
@@ -1151,7 +1292,7 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
 
         dc.fillRoundedRectangle(trackRect, d2d::Color::RGB(0x2D, 0x2D, 0x2D), trackWidth * 0.5f);
 
-        float visibleRatio = listRect.getHeight() / contentHeight;
+        float visibleRatio = listRect.getHeight() / std::max(contentHeight, 1.0f);
 
         float thumbHeight = std::max(30.0f * scale, listRect.getHeight() * visibleRatio);
 
@@ -1166,6 +1307,76 @@ auto drawModule = [&](const Nexus::NexusModuleInfo& module, bool favorite, int c
         d2d::Rect thumbRect = { trackRect.left, thumbTop, trackRect.right, thumbTop + thumbHeight };
 
         dc.fillRoundedRectangle(thumbRect, d2d::Color::RGB(0x72, 0x72, 0x72), trackWidth * 0.5f);
+    }
+
+    //
+    // ============================================================
+    // VIEW DROPDOWN OVERLAY
+    // ============================================================
+    //
+
+    if (viewDropdownOpen) {
+        //
+        // Menu background.
+        //
+
+        dc.fillRoundedRectangle(viewMenuRect, d2d::Color::RGB(0x10, 0x10, 0x10).asAlpha(0.98f), 8.0f * scale);
+
+        dc.drawRoundedRectangle(viewMenuRect, d2d::Color::RGB(0x4F, 0x4F, 0x4F), 8.0f * scale, 1.0f * scale);
+
+        for (int index = 0; index < 3; ++index) {
+            const d2d::Rect& optionRect = viewOptionRects[index];
+
+            bool selected = Nexus::NexusConfig::viewMode == viewModes[index];
+
+            bool hovering = shouldSelect(optionRect, cursorPos);
+
+            d2d::Color optionBackground;
+
+            if (selected) {
+                optionBackground = d2d::Color::RGB(0x34, 0x5E, 0x82);
+            }
+
+            else if (hovering) {
+                optionBackground = d2d::Color::RGB(0x2B, 0x2B, 0x2B);
+            }
+
+            else {
+                optionBackground = d2d::Color::RGB(0x18, 0x18, 0x18);
+            }
+
+            dc.fillRoundedRectangle(optionRect, optionBackground, 6.0f * scale);
+
+            if (selected) {
+                dc.drawRoundedRectangle(optionRect, d2d::Color::RGB(0x62, 0x92, 0xBC), 6.0f * scale, 1.0f * scale);
+            }
+
+            d2d::Rect optionTextRect = { optionRect.left + 10.0f * scale,
+
+                                         optionRect.top,
+
+                                         optionRect.right - 27.0f * scale,
+
+                                         optionRect.bottom };
+
+            dc.drawText(optionTextRect, viewNames[index],
+                        selected ? d2d::Colors::WHITE : d2d::Color::RGB(0xD0, 0xD0, 0xD0),
+                        Renderer::FontSelection::PrimaryRegular, 11.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
+                        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+            if (selected) {
+                d2d::Rect checkRect = { optionRect.right - 27.0f * scale,
+
+                                        optionRect.top,
+
+                                        optionRect.right - 7.0f * scale,
+
+                                        optionRect.bottom };
+
+                dc.drawText(checkRect, L"\u2713", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
+                            11.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            }
+        }
     }
 
     //

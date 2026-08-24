@@ -6,6 +6,7 @@
 #include "module/NexusModuleRegistry.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -95,9 +96,9 @@ namespace Nexus {
             file >> json;
 
             //
-            // ========================================================
+            // ====================================================
             // GENERAL
-            // ========================================================
+            // ====================================================
             //
 
             menuKey = json.value("menuKey", static_cast<int>('N'));
@@ -116,10 +117,12 @@ namespace Nexus {
                 viewMode = NexusViewMode::List;
             }
 
+            blockListColumns = std::clamp(json.value("blockListColumns", 1), 1, 3);
+
             //
-            // ========================================================
+            // ====================================================
             // FAVORITES
-            // ========================================================
+            // ====================================================
             //
 
             favoriteOrder.clear();
@@ -135,18 +138,16 @@ namespace Nexus {
             sanitizeFavoriteOrder();
 
             //
-            // ========================================================
+            // ====================================================
             // X-RAY
-            // ========================================================
+            // ====================================================
             //
 
             if (json.contains("xray") && json["xray"].is_object()) {
                 const auto& xray = json["xray"];
 
                 //
-                // ----------------------------------------------------
                 // TARGET ORDER
-                // ----------------------------------------------------
                 //
 
                 if (xray.contains("targetOrder") && xray["targetOrder"].is_array()) {
@@ -162,17 +163,13 @@ namespace Nexus {
                 sanitizeXRayTargetOrder();
 
                 //
-                // ----------------------------------------------------
                 // MASTER
-                // ----------------------------------------------------
                 //
 
                 xRaySettings.enabled = xray.value("enabled", xRaySettings.enabled);
 
                 //
-                // ----------------------------------------------------
-                // ORE ESP
-                // ----------------------------------------------------
+                // ORE
                 //
 
                 xRaySettings.oreESP = xray.value("oreESP", xRaySettings.oreESP);
@@ -196,9 +193,7 @@ namespace Nexus {
                 xRaySettings.redstone = xray.value("redstone", xRaySettings.redstone);
 
                 //
-                // ----------------------------------------------------
                 // ORE APPEARANCE
-                // ----------------------------------------------------
                 //
 
                 xRaySettings.oreRange = xray.value("oreRange", xRaySettings.oreRange);
@@ -216,9 +211,7 @@ namespace Nexus {
                 xRaySettings.oreFill = xray.value("oreFill", legacyFill);
 
                 //
-                // ----------------------------------------------------
                 // INDIVIDUAL ORE COLORS
-                // ----------------------------------------------------
                 //
 
                 if (xray.contains("oreColors") && xray["oreColors"].is_object()) {
@@ -246,9 +239,7 @@ namespace Nexus {
                 }
 
                 //
-                // ----------------------------------------------------
-                // CAVE ESP
-                // ----------------------------------------------------
+                // CAVE
                 //
 
                 xRaySettings.caveESP = xray.value("caveESP", xRaySettings.caveESP);
@@ -276,9 +267,7 @@ namespace Nexus {
                 xRaySettings.caveFill = xray.value("caveFill", legacyFill);
 
                 //
-                // ====================================================
-                // CLAMP LOADED VALUES
-                // ====================================================
+                // CLAMP
                 //
 
                 xRaySettings.oreRange = std::clamp(xRaySettings.oreRange, 16, 128);
@@ -320,6 +309,8 @@ namespace Nexus {
 
             viewMode = NexusViewMode::List;
 
+            blockListColumns = 1;
+
             favoriteOrder.clear();
 
             xRayTargetOrder = defaultXRayTargetOrder();
@@ -342,7 +333,10 @@ namespace Nexus {
         nlohmann::json json;
 
         json["version"] = 4;
+
         json["menuKey"] = menuKey;
+
+        json["blockListColumns"] = std::clamp(blockListColumns, 1, 3);
 
         switch (viewMode) {
         case NexusViewMode::Medium:
@@ -370,42 +364,61 @@ namespace Nexus {
                          { "oreESP", xRaySettings.oreESP },
 
                          { "diamond", xRaySettings.diamond },
+
                          { "ancientDebris", xRaySettings.ancientDebris },
+
                          { "emerald", xRaySettings.emerald },
+
                          { "gold", xRaySettings.gold },
+
                          { "iron", xRaySettings.iron },
+
                          { "copper", xRaySettings.copper },
+
                          { "coal", xRaySettings.coal },
+
                          { "lapis", xRaySettings.lapis },
+
                          { "redstone", xRaySettings.redstone },
 
                          { "oreRange", xRaySettings.oreRange },
+
                          { "oreOpacity", xRaySettings.oreOpacity },
+
                          { "oreBrightness", xRaySettings.oreBrightness },
 
                          { "oreOutline", xRaySettings.oreOutline },
+
                          { "oreFill", xRaySettings.oreFill },
 
                          { "targetOrder", xRayTargetOrder },
 
                          { "caveESP", xRaySettings.caveESP },
+
                          { "airCheck3x3x3", xRaySettings.airCheck3x3x3 },
+
                          { "ignoreSurface", xRaySettings.ignoreSurface },
 
                          { "scanRange", xRaySettings.scanRange },
+
                          { "caveOpacity", xRaySettings.caveOpacity },
+
                          { "caveBrightness", xRaySettings.caveBrightness },
+
                          { "caveOutlineOpacity", xRaySettings.caveOutlineOpacity },
 
                          { "caveColorR", xRaySettings.caveColorR },
+
                          { "caveColorG", xRaySettings.caveColorG },
+
                          { "caveColorB", xRaySettings.caveColorB },
 
                          { "caveOutline", xRaySettings.caveOutline },
+
                          { "caveFill", xRaySettings.caveFill } };
 
         //
-        // Individual Ore colors.
+        // Individual target colors.
         //
 
         auto& colorJson = json["xray"]["oreColors"];
@@ -421,7 +434,11 @@ namespace Nexus {
 
             const auto& color = xRaySettings.oreColors[index];
 
-            colorJson[key] = { { "r", color.r }, { "g", color.g }, { "b", color.b } };
+            colorJson[key] = { { "r", color.r },
+
+                               { "g", color.g },
+
+                               { "b", color.b } };
         }
 
         std::ofstream file(path);
@@ -462,10 +479,8 @@ namespace Nexus {
             }
         }
 
-        else {
-            if (it != favoriteOrder.end()) {
-                favoriteOrder.erase(it);
-            }
+        else if (it != favoriteOrder.end()) {
+            favoriteOrder.erase(it);
         }
 
         save();
@@ -563,10 +578,10 @@ namespace Nexus {
         std::vector<std::string> cleaned;
 
         //
-        // Keep non-empty unique IDs.
+        // Unknown IDs are intentionally kept.
         //
-        // Unknown IDs are intentionally preserved so this format
-        // already supports future custom/modded X-Ray targets.
+        // That means custom/modded targets can use this same
+        // ordering format later.
         //
 
         for (const auto& id : xRayTargetOrder) {
@@ -582,7 +597,7 @@ namespace Nexus {
         }
 
         //
-        // Always restore missing built-in targets.
+        // Restore any missing built-ins.
         //
 
         for (const auto& id : defaultXRayTargetOrder()) {

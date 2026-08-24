@@ -2,6 +2,7 @@
 #include "XRayScanner.h"
 
 #include "XRaySettings.h"
+#include "XRayBlockCatalog.h"
 
 #include "client/event/Eventing.h"
 #include "client/event/events/RenderLevelEvent.h"
@@ -501,6 +502,24 @@ namespace Nexus {
             BlockPos const pos = ores[oreValidationIndex].pos;
 
             SDK::Block* block = region->getBlock(pos);
+
+            if (!block) {
+                continue;
+            }
+
+            //
+            // ============================================================
+            // RUNTIME BLOCK CATALOG
+            // ============================================================
+            //
+            // The scanner is already touching this block, so recording its
+            // block type adds essentially no extra world-query cost.
+            //
+            // This also means addon/modded namespaces are discovered without
+            // hard-coding them.
+            //
+
+            XRayBlockCatalog::observe(block);
 
             auto type = classifyOre(block);
 
@@ -3147,48 +3166,48 @@ namespace Nexus {
         // ============================================================
         //
 
-        auto getOreColor = [&](OreType type) -> d2d::Color {
-            std::size_t colorIndex = 0;
+auto getOreColor = [&](OreType type) -> d2d::Color {
+            XRayBuiltInTarget target = XRayBuiltInTarget::Diamond;
 
             switch (type) {
             case OreType::Diamond:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Diamond);
+                target = XRayBuiltInTarget::Diamond;
                 break;
 
             case OreType::Emerald:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Emerald);
-                break;
-
-            case OreType::AncientDebris:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::AncientDebris);
+                target = XRayBuiltInTarget::Emerald;
                 break;
 
             case OreType::Gold:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Gold);
+                target = XRayBuiltInTarget::Gold;
                 break;
 
             case OreType::Iron:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Iron);
-                break;
-
-            case OreType::Copper:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Copper);
+                target = XRayBuiltInTarget::Iron;
                 break;
 
             case OreType::Redstone:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Redstone);
+                target = XRayBuiltInTarget::Redstone;
                 break;
 
             case OreType::Lapis:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Lapis);
+                target = XRayBuiltInTarget::Lapis;
                 break;
 
             case OreType::Coal:
-                colorIndex = static_cast<std::size_t>(XRayBuiltInTarget::Coal);
+                target = XRayBuiltInTarget::Coal;
+                break;
+
+            case OreType::Copper:
+                target = XRayBuiltInTarget::Copper;
+                break;
+
+            case OreType::AncientDebris:
+                target = XRayBuiltInTarget::AncientDebris;
                 break;
             }
 
-            const XRayColor& base = xRaySettings.oreColors[colorIndex];
+            const XRayColor& baseColor = xRaySettings.oreColors[static_cast<std::size_t>(target)];
 
             float brightness = std::clamp(static_cast<float>(xRaySettings.oreBrightness) / 100.0f, 0.10f, 1.50f);
 
@@ -3196,7 +3215,7 @@ namespace Nexus {
                 return std::clamp(static_cast<int>(std::lround(static_cast<float>(value) * brightness)), 0, 255);
             };
 
-            return d2d::Color::RGB(channel(base.r), channel(base.g), channel(base.b));
+            return d2d::Color::RGB(channel(baseColor.r), channel(baseColor.g), channel(baseColor.b));
         };
 
         //

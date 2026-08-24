@@ -19,9 +19,9 @@ namespace Nexus {
         static void save();
 
         //
-        // ============================================================
-        // NEXUS FAVORITES
-        // ============================================================
+        // ========================================================
+        // FAVORITES
+        // ========================================================
         //
 
         static bool isFavorite(const std::string& moduleId);
@@ -33,9 +33,9 @@ namespace Nexus {
         static const std::vector<std::string>& getFavoriteOrder();
 
         //
-        // ============================================================
+        // ========================================================
         // X-RAY TARGET ORDER
-        // ============================================================
+        // ========================================================
         //
 
         static const std::vector<std::string>& getXRayTargetOrder();
@@ -44,15 +44,10 @@ namespace Nexus {
 
         static void resetXRayTargetOrder();
 
-        //
-        // ============================================================
-        // GENERAL
-        // ============================================================
-        //
-
         inline static int menuKey = 'N';
 
         inline static NexusViewMode viewMode = NexusViewMode::List;
+        inline static int blockListColumns = 1;
 
     private:
         static std::filesystem::path getConfigPath();
@@ -65,19 +60,7 @@ namespace Nexus {
 
         inline static std::vector<std::string> favoriteOrder {};
 
-        //
-        // Default visual order:
-        //
-        // Diamond       Emerald
-        // AncientDebris Gold
-        // Iron          Copper
-        // Redstone      Lapis
-        // Coal
-        //
-
-        inline static std::vector<std::string> xRayTargetOrder { "diamond",  "emerald", "ancient_debris",
-                                                                 "gold",     "iron",    "copper",
-                                                                 "redstone", "lapis",   "coal" };
+        inline static std::vector<std::string> xRayTargetOrder {};
     };
 
 } // namespace Nexus

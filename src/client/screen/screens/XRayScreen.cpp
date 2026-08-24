@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "XRayScreen.h"
+#include "XRayBlockListScreen.h"
 #include "NexusScreen.h"
 
 #include "client/feature/nexus/ui/NexusControls.h"
@@ -679,11 +680,31 @@ void XRayScreen::onRender(Event&) {
 
     //
     // ============================================================
+    // BLOCK LIST BUTTON
+    // ============================================================
+    //
+
+    float blockListTop = helperTop + helperHeight + 6.0f * scale;
+
+    float blockListHeight = 27.0f * scale;
+
+    d2d::Rect blockListRect = { leftInner, blockListTop, leftInnerRight, blockListTop + blockListHeight };
+
+    bool openBlockList = false;
+
+    if (drawSmallButton(blockListRect, L"Block List...", oresAvailable)) {
+        playClickSound();
+
+        openBlockList = true;
+    }
+
+    //
+    // ============================================================
     // SCROLLABLE TARGET VIEWPORT
     // ============================================================
     //
 
-    float viewportTop = helperTop + helperHeight + 8.0f * scale;
+    float viewportTop = blockListRect.bottom + 8.0f * scale;
 
     float targetViewportHeight = 235.0f * scale;
 
@@ -1415,6 +1436,18 @@ void XRayScreen::onRender(Event&) {
 
     dc.drawText(versionRect, L"X-Ray v0.1", d2d::Color::RGB(0x90, 0x90, 0x90), Renderer::FontSelection::PrimaryRegular,
                 12.0f * scale, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    //
+    // ============================================================
+    // OPEN BLOCK LIST
+    // ============================================================
+    //
+
+    if (openBlockList) {
+        Latite::getScreenManager().showScreen<XRayBlockListScreen>();
+
+        return;
+    }
 
     //
     // ============================================================
