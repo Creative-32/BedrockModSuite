@@ -2,6 +2,7 @@
 #include "NexusScreen.h"
 
 #include "XRayScreen.h"
+#include "LightLevelScreen.h"
 
 #include "client/Latite.h"
 #include "client/event/Eventing.h"
@@ -10,27 +11,35 @@
 #include "client/event/events/KeyUpdateEvent.h"
 #include "client/event/events/RenderOverlayEvent.h"
 #include "client/screen/ScreenManager.h"
-#include "client/feature/nexus/navigation/NexusNavigation.h"
 
+#include "client/feature/nexus/navigation/NexusNavigation.h"
 #include "client/feature/nexus/NexusConfig.h"
 #include "client/feature/nexus/module/NexusModuleRegistry.h"
 #include "client/feature/nexus/ui/NexusControls.h"
-#include "client/feature/nexus/xray/XRaySettings.h"
 #include "client/feature/nexus/notification/NexusNotificationManager.h"
+
+#include "client/feature/nexus/xray/XRaySettings.h"
 #include "client/feature/nexus/xray/XRayScanner.h"
+
+#include "client/feature/nexus/lightlevel/LightLevelScanner.h"
+#include "client/feature/nexus/lightlevel/LightLevelSettings.h"
 
 #include "util/DrawContext.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
-#include <vector>
-
 #include <cwctype>
+#include <vector>
 
 NexusScreen::NexusScreen() {
     Nexus::NexusConfig::load();
+
     Nexus::NexusNotificationManager::initialize();
+
     Nexus::XRayScanner::initialize();
+
+    Nexus::LightLevelScanner::initialize();
 
     this->key = KeyValue(Nexus::NexusConfig::menuKey);
 
@@ -111,7 +120,9 @@ void NexusScreen::onDisable() {
 }
 
 void NexusScreen::onClick(Event& event) {
-    if (!isActive()) return;
+    if (!isActive()) {
+        return;
+    }
 
     auto& clickEvent = reinterpret_cast<ClickEvent&>(event);
 
@@ -303,7 +314,7 @@ void NexusScreen::onRender(Event&) {
     }
 
     //
-    // Keep the old enum values internally.
+    // Keep old enum names internally.
     //
     // UI:
     //
@@ -355,13 +366,8 @@ void NexusScreen::onRender(Event&) {
     // Current view name.
     //
 
-    d2d::Rect viewTextRect = { viewSelectorRect.left + 10.0f * scale,
-
-                               viewSelectorRect.top,
-
-                               viewSelectorRect.right - 28.0f * scale,
-
-                               viewSelectorRect.bottom };
+    d2d::Rect viewTextRect = { viewSelectorRect.left + 10.0f * scale, viewSelectorRect.top,
+                               viewSelectorRect.right - 28.0f * scale, viewSelectorRect.bottom };
 
     dc.drawText(viewTextRect, currentViewName, d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
                 11.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -370,13 +376,8 @@ void NexusScreen::onRender(Event&) {
     // Arrow.
     //
 
-    d2d::Rect viewArrowRect = { viewSelectorRect.right - 28.0f * scale,
-
-                                viewSelectorRect.top,
-
-                                viewSelectorRect.right - 5.0f * scale,
-
-                                viewSelectorRect.bottom };
+    d2d::Rect viewArrowRect = { viewSelectorRect.right - 28.0f * scale, viewSelectorRect.top,
+                                viewSelectorRect.right - 5.0f * scale, viewSelectorRect.bottom };
 
     dc.drawText(viewArrowRect, viewDropdownOpen ? L"\u25B4" : L"\u25BE", d2d::Color::RGB(0xC8, 0xC8, 0xC8),
                 Renderer::FontSelection::PrimaryRegular, 11.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER,
@@ -453,7 +454,7 @@ void NexusScreen::onRender(Event&) {
         }
 
         //
-        // Clicking anywhere outside the selector/menu closes it.
+        // Clicking anywhere outside selector/menu closes it.
         //
 
         bool overViewMenu = shouldSelect(viewMenuRect, cursorPos);
@@ -462,18 +463,13 @@ void NexusScreen::onRender(Event&) {
             viewDropdownOpen = false;
 
             //
-            // Consume this click so closing the menu doesn't also
-            // activate a module underneath it.
+            // Consume click so it doesn't activate
+            // a module underneath the dropdown.
             //
 
             viewDropdownConsumedClick = true;
         }
     }
-
-    //
-    // This is used below to prevent the dropdown from clicking
-    // controls underneath it.
-    //
 
     bool cursorOverViewMenu = viewDropdownOpen && shouldSelect(viewMenuRect, cursorPos);
 
@@ -489,6 +485,7 @@ void NexusScreen::onRender(Event&) {
     dc.drawText(subtitleRect, L"Select a module", d2d::Color::RGB(0xB0, 0xB0, 0xB0).asAlpha(0.80f),
                 Renderer::FontSelection::PrimaryRegular, 14.0f * scale, DWRITE_TEXT_ALIGNMENT_LEADING,
                 DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
     //
     // SEARCH
     //
@@ -497,11 +494,6 @@ void NexusScreen::onRender(Event&) {
                              panelRect.top + 110.0f * scale };
 
     bool hasSearchText = !searchBox.getText().empty();
-
-    //
-    // Leave padding on the left and room
-    // for the clear button on the right.
-    //
 
     d2d::Rect searchTextRect = { searchRect.left + 10.0f * scale, searchRect.top + 4.0f * scale,
                                  searchRect.right - (hasSearchText ? 34.0f * scale : 10.0f * scale),
@@ -525,6 +517,7 @@ void NexusScreen::onRender(Event&) {
     if (justClicked[0] && !blockPageInput) {
         if (clearHovered) {
             searchBox.reset();
+
             searchBox.setSelected(true);
 
             scroll = 0.0f;
@@ -543,20 +536,11 @@ void NexusScreen::onRender(Event&) {
                                   : searchHovered        ? d2d::Color::RGB(0x20, 0x20, 0x20)
                                                          : d2d::Color::RGB(0x18, 0x18, 0x18);
 
-    //
-    // Draw the full search box ourselves.
-    //
-
     dc.fillRoundedRectangle(searchRect, searchBackground, 8.0f * scale);
 
     dc.drawRoundedRectangle(
         searchRect, searchBox.isSelected() ? d2d::Color::RGB(0x42, 0x78, 0xA8) : d2d::Color::RGB(0x48, 0x48, 0x48),
         8.0f * scale, searchBox.isSelected() ? 1.5f * scale : 1.0f * scale);
-
-    //
-    // TextBox now only supplies text + caret.
-    // Transparent background keeps our outer box visible.
-    //
 
     searchBox.render(dc, 0.0f, d2d::Color::RGB(0x00, 0x00, 0x00).asAlpha(0.0f), d2d::Colors::WHITE,
                      DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -581,7 +565,9 @@ void NexusScreen::onRender(Event&) {
     }
 
     //
+    // ============================================================
     // BUILD DISPLAY ORDER
+    // ============================================================
     //
 
     const auto& modules = Nexus::NexusModuleRegistry::getModules();
@@ -591,6 +577,12 @@ void NexusScreen::onRender(Event&) {
     std::vector<const Nexus::NexusModuleInfo*> favoriteModules;
 
     std::vector<const Nexus::NexusModuleInfo*> normalModules;
+
+    //
+    // IMPORTANT:
+    // Populate favorites here.
+    // Do not open modules from this loop.
+    //
 
     for (const auto& favoriteId : favoriteOrder) {
         const auto* module = Nexus::NexusModuleRegistry::find(favoriteId);
@@ -739,19 +731,23 @@ void NexusScreen::onRender(Event&) {
     lerpScroll = std::clamp(lerpScroll, 0.0f, scrollMax);
 
     //
+    // These are per-render navigation requests.
+    //
+
+    bool openXRay = false;
+
+    bool openLightLevel = false;
+
+    //
     // ============================================================
     // FAVORITE CLICK / HOLD / DRAG
     // ============================================================
     //
 
-    bool openXRay = false;
-
     constexpr auto FavoriteDragHoldDelay = std::chrono::milliseconds(230);
 
     //
-    // ------------------------------------------------------------
     // PENDING CARD PRESS -> DRAG
-    // ------------------------------------------------------------
     //
 
     if (favoriteDragPending && !draggingFavorite && mouseButtons[0]) {
@@ -763,9 +759,7 @@ void NexusScreen::onRender(Event&) {
     }
 
     //
-    // ------------------------------------------------------------
     // ACTIVE DRAG
-    // ------------------------------------------------------------
     //
 
     if (draggingFavorite && mouseButtons[0]) {
@@ -802,9 +796,7 @@ void NexusScreen::onRender(Event&) {
     }
 
     //
-    // ------------------------------------------------------------
     // RELEASE
-    // ------------------------------------------------------------
     //
 
     if ((favoriteDragPending || draggingFavorite) && !mouseButtons[0]) {
@@ -813,9 +805,7 @@ void NexusScreen::onRender(Event&) {
         bool wasDragging = draggingFavorite;
 
         //
-        // --------------------------------------------------------
         // DROP
-        // --------------------------------------------------------
         //
 
         if (wasDragging && !releasedModuleId.empty()) {
@@ -833,9 +823,7 @@ void NexusScreen::onRender(Event&) {
         }
 
         //
-        // --------------------------------------------------------
         // SHORT CLICK
-        // --------------------------------------------------------
         //
 
         else if (favoriteDragPending && !releasedModuleId.empty()) {
@@ -850,10 +838,18 @@ void NexusScreen::onRender(Event&) {
             if (stayedNearPress) {
                 const auto* module = Nexus::NexusModuleRegistry::find(releasedModuleId);
 
-                if (module != nullptr && module->id == "xray") {
-                    playClickSound();
+                if (module != nullptr) {
+                    if (module->id == "xray") {
+                        playClickSound();
 
-                    openXRay = true;
+                        openXRay = true;
+                    }
+
+                    else if (module->id == "lightlevel") {
+                        playClickSound();
+
+                        openLightLevel = true;
+                    }
                 }
             }
         }
@@ -905,8 +901,7 @@ void NexusScreen::onRender(Event&) {
         float contentTop = targetContentTop;
 
         //
-        // Smoothly move favorites toward their
-        // temporary preview positions.
+        // Smooth favorite movement.
         //
 
         if (favorite) {
@@ -915,15 +910,12 @@ void NexusScreen::onRender(Event&) {
             auto [yIt, insertedY] = favoriteAnimY.try_emplace(module.id, targetContentTop);
 
             if (isDraggingThis) {
-                //
-                // The placeholder should immediately
-                // occupy the current destination slot.
-                //
-
                 xIt->second = targetLeft;
 
                 yIt->second = targetContentTop;
-            } else {
+            }
+
+            else {
                 float reflowAmount = std::clamp(Latite::getRenderer().getDeltaTime() * 14.0f, 0.0f, 1.0f);
 
                 xIt->second = std::lerp(xIt->second, targetLeft, reflowAmount);
@@ -955,9 +947,7 @@ void NexusScreen::onRender(Event&) {
         bool tileHovered = isActive() && cursorInsideList && shouldSelect(tileRect, cursorPos);
 
         //
-        // ========================================================
         // HOVER BLOOM
-        // ========================================================
         //
 
         float& hoverAnim = moduleHoverAnim[module.id];
@@ -969,11 +959,6 @@ void NexusScreen::onRender(Event&) {
         hoverAnim = std::lerp(hoverAnim, hoverTarget, hoverBlend);
 
         if (favorite) {
-            //
-            // Favorites get a subtle blue-tinted card instead of
-            // using the exact same gray as normal modules.
-            //
-
             int red = static_cast<int>(std::lround(0x16 + hoverAnim * 0x08));
 
             int green = static_cast<int>(std::lround(0x1C + hoverAnim * 0x0B));
@@ -981,10 +966,6 @@ void NexusScreen::onRender(Event&) {
             int blue = static_cast<int>(std::lround(0x24 + hoverAnim * 0x10));
 
             dc.fillRoundedRectangle(tileRect, d2d::Color::RGB(red, green, blue), 10.0f * scale);
-
-            //
-            // Small favorite accent strip.
-            //
 
             d2d::Rect favoriteAccent = { tileRect.left + 2.0f * scale, tileRect.top + 8.0f * scale,
                                          tileRect.left + 5.0f * scale, tileRect.bottom - 8.0f * scale };
@@ -998,18 +979,9 @@ void NexusScreen::onRender(Event&) {
             dc.fillRoundedRectangle(tileRect, d2d::Color::RGB(tileShade, tileShade, tileShade), 10.0f * scale);
         }
 
-        //
-        // Outer soft bloom.
-        //
-
         if (hoverAnim > 0.01f) {
-            d2d::Rect bloomRect = { tileRect.left - 1.0f * scale,
-
-                                    tileRect.top - 1.0f * scale,
-
-                                    tileRect.right + 1.0f * scale,
-
-                                    tileRect.bottom + 1.0f * scale };
+            d2d::Rect bloomRect = { tileRect.left - 1.0f * scale, tileRect.top - 1.0f * scale,
+                                    tileRect.right + 1.0f * scale, tileRect.bottom + 1.0f * scale };
 
             dc.drawRoundedRectangle(bloomRect, d2d::Color::RGB(0x4B, 0x86, 0xBA).asAlpha(hoverAnim * 0.15f),
                                     11.0f * scale, 2.5f * scale);
@@ -1024,10 +996,8 @@ void NexusScreen::onRender(Event&) {
                                 10.0f * scale, 1.0f * scale);
 
         if (favorite && draggingFavorite && favoriteIndex == dragTargetIndex) {
-            dc.drawRoundedRectangle(tileRect,
-                                    favorite ? d2d::Color::RGB(0x42, 0x78, 0xA8).asAlpha(0.60f)
-                                                : d2d::Color::RGB(0x48, 0x48, 0x48).asAlpha(0.65f),
-                                    10.0f * scale, 1.0f * scale);
+            dc.drawRoundedRectangle(tileRect, d2d::Color::RGB(0x42, 0x78, 0xA8).asAlpha(0.60f), 10.0f * scale,
+                                    1.0f * scale);
         }
 
         //
@@ -1079,7 +1049,9 @@ void NexusScreen::onRender(Event&) {
         if (showDescription) {
             nameRect = { textLeft, tileRect.top + 4.0f * scale, starRect.left - 6.0f * scale,
                          tileRect.top + 31.0f * scale };
-        } else {
+        }
+
+        else {
             nameRect = { textLeft, tileRect.top, starRect.left - 6.0f * scale, tileRect.bottom };
         }
 
@@ -1097,25 +1069,42 @@ void NexusScreen::onRender(Event&) {
         }
 
         //
+        // ====================================================
         // SWITCH / SOON
+        // ====================================================
         //
 
         bool actionHovered = isActive() && cursorInsideList && shouldSelect(actionRect, cursorPos);
 
-        bool implemented = module.id == "xray";
+        bool isXRay = module.id == "xray";
 
-        if (implemented) {
-            if (actionHovered) {
-                cursor = Cursor::Hand;
-            }
+        bool isLightLevel = module.id == "lightlevel";
 
+        bool implemented = isXRay || isLightLevel;
+
+        if (implemented && actionHovered) {
+            cursor = Cursor::Hand;
+        }
+
+        if (isXRay) {
             if (Nexus::UI::drawSwitch(dc, actionRect, Nexus::xRaySettings.enabled, actionHovered, justClicked[0],
                                       scale)) {
                 playClickSound();
 
                 Nexus::NexusConfig::save();
             }
-        } else {
+        }
+
+        else if (isLightLevel) {
+            if (Nexus::UI::drawSwitch(dc, actionRect, Nexus::lightLevelSettings.enabled, actionHovered, justClicked[0],
+                                      scale)) {
+                playClickSound();
+
+                Nexus::NexusConfig::save();
+            }
+        }
+
+        else {
             dc.fillRoundedRectangle(actionRect, d2d::Color::RGB(0x2C, 0x2C, 0x2C), actionRect.getHeight() * 0.5f);
 
             dc.drawText(actionRect, L"SOON", d2d::Color::RGB(0x91, 0x91, 0x91), Renderer::FontSelection::PrimaryRegular,
@@ -1123,21 +1112,9 @@ void NexusScreen::onRender(Event&) {
         }
 
         //
-        // ========================================================
+        // ====================================================
         // CARD BODY
-        // ========================================================
-        //
-        // Favorite module:
-        //
-        // quick click
-        //     -> module action
-        //
-        // long hold
-        //     -> drag/reorder
-        //
-        // Non-favorite module:
-        //
-        // normal click behavior
+        // ====================================================
         //
 
         bool bodyHovered = tileHovered && !starHovered && !actionHovered;
@@ -1147,7 +1124,10 @@ void NexusScreen::onRender(Event&) {
         }
 
         //
-        // Favorite cards use delayed click/hold behavior.
+        // Favorite cards:
+        //
+        // quick click -> open module
+        // long hold   -> drag/reorder
         //
 
         if (favorite && searchText.empty() && bodyHovered && justClicked[0] && !favoriteDragPending &&
@@ -1172,14 +1152,19 @@ void NexusScreen::onRender(Event&) {
         }
 
         //
-        // Non-favorites are not reorderable in the existing favorite-order
-        // system, so they retain normal click behavior.
+        // Non-favorites open immediately.
         //
 
         else if (!favorite && implemented && bodyHovered && justClicked[0]) {
             playClickSound();
 
-            openXRay = true;
+            if (isXRay) {
+                openXRay = true;
+            }
+
+            else if (isLightLevel) {
+                openLightLevel = true;
+            }
         }
     };
 
@@ -1190,9 +1175,9 @@ void NexusScreen::onRender(Event&) {
     float favoritesTop = listRect.top;
 
     for (std::size_t i = 0; i < displayFavoriteModules.size(); ++i) {
-        int row = static_cast<int>(i / columnCount);
+        int row = static_cast<int>(i / static_cast<std::size_t>(columnCount));
 
-        int column = static_cast<int>(i % columnCount);
+        int column = static_cast<int>(i % static_cast<std::size_t>(columnCount));
 
         drawModule(*displayFavoriteModules[i], true, column, row, favoritesTop, i);
     }
@@ -1208,15 +1193,17 @@ void NexusScreen::onRender(Event&) {
     }
 
     for (std::size_t i = 0; i < normalModules.size(); ++i) {
-        int row = static_cast<int>(i / columnCount);
+        int row = static_cast<int>(i / static_cast<std::size_t>(columnCount));
 
-        int column = static_cast<int>(i % columnCount);
+        int column = static_cast<int>(i % static_cast<std::size_t>(columnCount));
 
         drawModule(*normalModules[i], false, column, row, normalTop, 0);
     }
 
     //
+    // ============================================================
     // FLOATING DRAGGED FAVORITE
+    // ============================================================
     //
 
     if (draggingFavorite) {
@@ -1227,19 +1214,11 @@ void NexusScreen::onRender(Event&) {
 
             float draggedTop = cursorPos.y - dragOffsetY;
 
-            //
-            // Keep the floating tile inside the module area.
-            //
-
             draggedLeft = std::clamp(draggedLeft, listRect.left, listRect.right - 10.0f * scale - tileWidth);
 
             draggedTop = std::clamp(draggedTop, listRect.top, listRect.bottom - tileHeight);
 
             d2d::Rect draggedRect = { draggedLeft, draggedTop, draggedLeft + tileWidth, draggedTop + tileHeight };
-
-            //
-            // Slightly brighter "lifted" appearance.
-            //
 
             dc.fillRoundedRectangle(draggedRect, d2d::Color::RGB(0x2C, 0x2C, 0x2C), 11.0f * scale);
 
@@ -1269,7 +1248,9 @@ void NexusScreen::onRender(Event&) {
             if (showDescription) {
                 floatingNameRect = { floatingTextLeft, draggedRect.top + 4.0f * scale,
                                      floatingStarRect.left - 6.0f * scale, draggedRect.top + 31.0f * scale };
-            } else {
+            }
+
+            else {
                 floatingNameRect = { floatingTextLeft, draggedRect.top, floatingStarRect.left - 6.0f * scale,
                                      draggedRect.bottom };
             }
@@ -1289,16 +1270,23 @@ void NexusScreen::onRender(Event&) {
                             DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             }
 
-            if (draggedModule->id == "xray") {
-                //
-                // Draw-only copy of the current X-Ray switch.
-                // Do not make it clickable while dragging.
-                //
+            //
+            // Draw-only switch while dragging.
+            //
 
+            if (draggedModule->id == "xray") {
                 bool floatingEnabled = Nexus::xRaySettings.enabled;
 
                 Nexus::UI::drawSwitch(dc, floatingActionRect, floatingEnabled, false, false, scale);
-            } else {
+            }
+
+            else if (draggedModule->id == "lightlevel") {
+                bool floatingEnabled = Nexus::lightLevelSettings.enabled;
+
+                Nexus::UI::drawSwitch(dc, floatingActionRect, floatingEnabled, false, false, scale);
+            }
+
+            else {
                 dc.fillRoundedRectangle(floatingActionRect, d2d::Color::RGB(0x34, 0x34, 0x34),
                                         floatingActionRect.getHeight() * 0.5f);
 
@@ -1348,10 +1336,6 @@ void NexusScreen::onRender(Event&) {
     //
 
     if (viewDropdownOpen) {
-        //
-        // Menu background.
-        //
-
         dc.fillRoundedRectangle(viewMenuRect, d2d::Color::RGB(0x10, 0x10, 0x10).asAlpha(0.98f), 8.0f * scale);
 
         dc.drawRoundedRectangle(viewMenuRect, d2d::Color::RGB(0x4F, 0x4F, 0x4F), 8.0f * scale, 1.0f * scale);
@@ -1383,13 +1367,8 @@ void NexusScreen::onRender(Event&) {
                 dc.drawRoundedRectangle(optionRect, d2d::Color::RGB(0x62, 0x92, 0xBC), 6.0f * scale, 1.0f * scale);
             }
 
-            d2d::Rect optionTextRect = { optionRect.left + 10.0f * scale,
-
-                                         optionRect.top,
-
-                                         optionRect.right - 27.0f * scale,
-
-                                         optionRect.bottom };
+            d2d::Rect optionTextRect = { optionRect.left + 10.0f * scale, optionRect.top,
+                                         optionRect.right - 27.0f * scale, optionRect.bottom };
 
             dc.drawText(optionTextRect, viewNames[index],
                         selected ? d2d::Colors::WHITE : d2d::Color::RGB(0xD0, 0xD0, 0xD0),
@@ -1397,13 +1376,8 @@ void NexusScreen::onRender(Event&) {
                         DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
             if (selected) {
-                d2d::Rect checkRect = { optionRect.right - 27.0f * scale,
-
-                                        optionRect.top,
-
-                                        optionRect.right - 7.0f * scale,
-
-                                        optionRect.bottom };
+                d2d::Rect checkRect = { optionRect.right - 27.0f * scale, optionRect.top,
+                                        optionRect.right - 7.0f * scale, optionRect.bottom };
 
                 dc.drawText(checkRect, L"\u2713", d2d::Colors::WHITE, Renderer::FontSelection::PrimaryRegular,
                             11.0f * scale, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -1423,13 +1397,23 @@ void NexusScreen::onRender(Event&) {
                 DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
     //
-    // X-RAY PAGE SWITCH
+    // ============================================================
+    // PAGE SWITCHES
+    // ============================================================
     //
 
     if (openXRay) {
         dc.ctx->SetTransform(originalTransform);
 
         Nexus::NexusNavigation::openSubmenu<XRayScreen>(*this);
+
+        return;
+    }
+
+    if (openLightLevel) {
+        dc.ctx->SetTransform(originalTransform);
+
+        Nexus::NexusNavigation::openSubmenu<LightLevelScreen>(*this);
 
         return;
     }

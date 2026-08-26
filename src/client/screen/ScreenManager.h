@@ -8,6 +8,7 @@
 #include "screens/NexusScreen.h"
 #include "screens/XRayScreen.h"
 #include "screens/XRayBlockListScreen.h"
+#include "screens/LightLevelScreen.h"
 
 #include "client/manager/StaticManager.h"
 #include "client/event/Listener.h"
@@ -21,7 +22,7 @@
 
 class ScreenManager : public Listener,
                       public StaticManager<Screen, ClickGUI, HUDEditor, SkinStealerScreen, GyroCalibrationScreen,
-                                           NexusScreen, XRayScreen, XRayBlockListScreen> {
+                                           NexusScreen, XRayScreen, XRayBlockListScreen, LightLevelScreen> {
 public:
     ScreenManager();
 

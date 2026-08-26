@@ -2,6 +2,7 @@
 #include "NexusConfig.h"
 
 #include "xray/XRaySettings.h"
+#include "lightlevel/LightLevelSettings.h"
 
 #include "module/NexusModuleRegistry.h"
 #include "xray/XRayTargets.h"
@@ -385,6 +386,42 @@ namespace Nexus {
                 XRayTargets::markChanged();
 
                 sanitizeXRayTargetOrder();
+
+                //
+                // ====================================================
+                // LIGHT LEVEL
+                // ====================================================
+                //
+
+                if (json.contains("lightLevel") && json["lightLevel"].is_object()) {
+                    const auto& light = json["lightLevel"];
+
+                    lightLevelSettings.enabled = light.value("enabled", lightLevelSettings.enabled);
+
+                    lightLevelSettings.range = light.value("range", lightLevelSettings.range);
+
+                    lightLevelSettings.opacity = light.value("opacity", lightLevelSettings.opacity);
+
+                    lightLevelSettings.brightness = light.value("brightness", lightLevelSettings.brightness);
+
+                    lightLevelSettings.outline = light.value("outline", lightLevelSettings.outline);
+
+                    lightLevelSettings.fill = light.value("fill", lightLevelSettings.fill);
+
+                    lightLevelSettings.showNumbers = light.value("showNumbers", lightLevelSettings.showNumbers);
+
+                    lightLevelSettings.distanceFade = light.value("distanceFade", lightLevelSettings.distanceFade);
+
+                    //
+                    // Clamp persisted values in case the config was edited manually.
+                    //
+
+                    lightLevelSettings.range = std::clamp(lightLevelSettings.range, 8, 64);
+
+                    lightLevelSettings.opacity = std::clamp(lightLevelSettings.opacity, 5, 100);
+
+                    lightLevelSettings.brightness = std::clamp(lightLevelSettings.brightness, 10, 150);
+                }
             }
 
             catch (...) {
@@ -399,6 +436,8 @@ namespace Nexus {
             xRayTargetOrder = defaultXRayTargetOrder();
 
             xRaySettings = XRaySettings {};
+
+            lightLevelSettings = LightLevelSettings {};
 
             XRayTargets::markChanged();
 
@@ -417,7 +456,7 @@ namespace Nexus {
 
         nlohmann::json json;
 
-        json["version"] = 5;
+        json["version"] = 6;
 
         json["menuKey"] = menuKey;
 
@@ -540,6 +579,21 @@ namespace Nexus {
 
                                { "b", color.b } };
         }
+
+        //
+        // ============================================================
+        // LIGHT LEVEL
+        // ============================================================
+        //
+
+        json["lightLevel"] = { { "enabled", lightLevelSettings.enabled },
+                               { "range", std::clamp(lightLevelSettings.range, 8, 64) },
+                               { "opacity", std::clamp(lightLevelSettings.opacity, 5, 100) },
+                               { "brightness", std::clamp(lightLevelSettings.brightness, 10, 150) },
+                               { "outline", lightLevelSettings.outline },
+                               { "fill", lightLevelSettings.fill },
+                               { "showNumbers", lightLevelSettings.showNumbers },
+                               { "distanceFade", lightLevelSettings.distanceFade } };
 
         std::ofstream file(path);
 

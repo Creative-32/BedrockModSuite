@@ -10,7 +10,7 @@ namespace Nexus {
         modules = { { "xray", L"X-Ray", L"Highlight ores and underground paths.", NexusCategory::World,
                       NexusModulePolicy::ServerGoverned },
 
-                    { "light_levels", L"Light Levels", L"Visualize block light levels.", NexusCategory::World,
+                    { "lightlevel", L"Light Levels", L"Visualize block light levels.", NexusCategory::World,
                       NexusModulePolicy::ClientOnly },
 
                     { "dynamic_light", L"Dynamic Light", L"Make held light-emitting items illuminate the area around you.",

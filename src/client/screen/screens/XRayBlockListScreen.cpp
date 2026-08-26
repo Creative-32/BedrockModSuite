@@ -111,27 +111,62 @@ namespace {
         }
 
         //
-        // Air.
+        // ============================================================
+        // AIR / INVISIBLE BLOCKS
+        // ============================================================
         //
-        if (path == "air" || path == "cave_air" || path == "void_air") {
+
+        if (/* path == "air" || path == "cave_air" || */path == "void_air" || path == "barrier" ||
+            path == "invisible_bedrock") {
             return true;
         }
 
         //
-        // Invisible Light blocks.
+        // ============================================================
+        // LIGHT BLOCK INTERNAL STATES
+        // ============================================================
         //
-        // light_block
-        // light_block_0
-        // ...
-        // light_block_15
-        //
-        if (path == "light_block" || path.starts_with("light_block_")) {
+
+        if (path == "light" || path == "light_block" || path.starts_with("light_block_")) {
             return true;
         }
 
         //
-        // Internal double slabs.
+        // ============================================================
+        // COMMAND / STRUCTURE / DEBUG BLOCKS
+        // ============================================================
         //
+
+        if (path == "command_block" || path == "chain_command_block" || path == "repeating_command_block" ||
+
+            path == "structure_block" || path == "structure_void" || path == "jigsaw" ||
+
+            path == "camera" ||
+
+            path == "client_request_placeholder_block" ||
+
+            path == "info_update" || path == "info_update2" ||
+
+            path == "reserved6" || path == "unknown") {
+            return true;
+        }
+
+        //
+        // ============================================================
+        // ENGINE / COLLISION HELPERS
+        // ============================================================
+        //
+
+        if (path == "moving_block" || path == "piston_arm_collision" || path == "sticky_piston_arm_collision") {
+            return true;
+        }
+
+        //
+        // ============================================================
+        // INTERNAL DOUBLE-SLAB STATES
+        // ============================================================
+        //
+
         if (path.find("double_slab") != std::string_view::npos) {
             return true;
         }
@@ -141,46 +176,95 @@ namespace {
         }
 
         //
-        // Internal sign forms.
+        // Older Bedrock slab container IDs.
         //
-        if (path.ends_with("_standing_sign") || path.ends_with("_wall_sign") || path.ends_with("_wall_hanging_sign")) {
+
+        if (path == "stone_slab" || path == "stone_slab2" || path == "stone_slab3" || path == "stone_slab4" ||
+
+            path == "double_stone_slab" || path == "double_stone_slab2" || path == "double_stone_slab3" ||
+            path == "double_stone_slab4" ||
+
+            path == "wooden_slab" || path == "double_wooden_slab") {
             return true;
         }
 
         //
-        // Banner internals.
+        // ============================================================
+        // INTERNAL SIGN / BANNER FORMS
+        // ============================================================
         //
-        if (path.ends_with("_standing_banner") || path.ends_with("_wall_banner")) {
+
+        if (path == "standing_sign" || path == "wall_sign" ||
+
+            path.ends_with("_standing_sign") || path.ends_with("_wall_sign") || path.ends_with("_wall_hanging_sign")) {
+            return true;
+        }
+
+        if (path == "standing_banner" || path == "wall_banner" ||
+
+            path.ends_with("_standing_banner") || path.ends_with("_wall_banner")) {
             return true;
         }
 
         //
-        // Fluid-state duplicates.
+        // ============================================================
+        // FLUID STATE DUPLICATES
+        // ============================================================
         //
+
         if (path == "flowing_water" || path == "flowing_lava") {
             return true;
         }
 
         //
-        // State duplicates.
+        // ============================================================
+        // LIT / UNLIT STATE DUPLICATES
+        // ============================================================
         //
-        if (path == "lit_redstone_ore" || path == "lit_furnace") {
+
+        if (path == "lit_redstone_ore" || path == "lit_furnace" || path == "lit_blast_furnace" ||
+            path == "lit_smoker" || path == "lit_redstone_lamp" || path == "unlit_redstone_torch") {
             return true;
         }
 
         //
-        // Engine / collision helpers.
+        // ============================================================
+        // OLD GENERIC BLOCK-CONTAINER IDS
+        // ============================================================
         //
-        if (path == "moving_block" || path == "piston_arm_collision" || path == "sticky_piston_arm_collision" ||
-            path == "reserved6" || path == "info_update" || path == "info_update2" || path == "unknown") {
+        // Modern named variants are much more useful in the X-Ray list.
+        //
+
+        if (path == "leaves" || path == "leaves2" ||
+
+            path == "log" || path == "log2" ||
+
+            path == "wood" || path == "planks") {
             return true;
         }
 
         //
-        // Education / chemistry blocks create a huge amount of noise.
+        // ============================================================
+        // EDUCATION / WORLD-BUILDER CONTENT
+        // ============================================================
         //
-        if (path.starts_with("element_") || path == "compound_creator" || path == "material_reducer" ||
-            path == "lab_table" || path == "allow" || path == "deny" || path == "border_block") {
+
+        if (path.starts_with("element_") ||
+
+            path == "compound_creator" || path == "material_reducer" || path == "lab_table" ||
+
+            path == "allow" || path == "deny" || path == "border_block") {
+            return true;
+        }
+
+        //
+        // ============================================================
+        // DEPRECATED / LEGACY CONTENT
+        // ============================================================
+        //
+
+        if (path == "deprecated_anvil" || path == "glowingobsidian" || path == "netherreactor" ||
+            path == "nether_reactor") {
             return true;
         }
 
@@ -270,6 +354,8 @@ namespace {
         Amethyst,
         Sculk,
         Copper,
+        Cinnabar,
+        Sulfur,
 
         Wool,
         Concrete,
@@ -339,6 +425,9 @@ namespace {
         { "amethyst", L"Amethyst", GroupKind::Amethyst },
         { "deep_dark", L"Deep Dark", GroupKind::Sculk },
         { "copper", L"Copper", GroupKind::Copper },
+
+        { "cinnabar", L"Cinnabar", GroupKind::Cinnabar },
+        { "sulfur", L"Sulfur", GroupKind::Sulfur },
 
         //
         // Colored/building families.
@@ -472,17 +561,22 @@ namespace {
 
                    path.find("stone_brick") != std::string_view::npos ||
 
-                   path == "deepslate" || path.starts_with("deepslate_") ||
+                   //
+                   // Any modern Deepslate family member:
+                   //
+                   // deepslate
+                   // chiseled_deepslate
+                   // polished_deepslate
+                   // deepslate_bricks
+                   // deepslate_tiles
+                   // stairs/slabs/walls
+                   //
+                   path.find("deepslate") != std::string_view::npos ||
 
-                   path == "cobbled_deepslate" || path.starts_with("cobbled_deepslate_") ||
-
-                   path.find("deepslate_brick") != std::string_view::npos ||
-
-                   path.find("deepslate_tile") != std::string_view::npos ||
-
-                   path == "tuff" || path.starts_with("tuff_") ||
-
-                   path.find("tuff_brick") != std::string_view::npos ||
+                   //
+                   // Same treatment for all Tuff variants.
+                   //
+                   path.find("tuff") != std::string_view::npos ||
 
                    path.find("granite") != std::string_view::npos ||
 
@@ -497,12 +591,13 @@ namespace {
                    path.find("prismarine") != std::string_view::npos ||
 
                    //
-                   // Quartz Ore already gets captured by Ores because
-                   // Ores appears before Stone.
+                   // Quartz Ore is captured by Ores first.
                    //
                    path.find("quartz") != std::string_view::npos ||
 
-                   path == "calcite" || path == "dripstone_block" || path == "pointed_dripstone" ||
+                   path == "calcite" ||
+
+                   path == "dripstone_block" || path == "pointed_dripstone" ||
 
                    path == "bedrock" ||
 
@@ -515,8 +610,11 @@ namespace {
             //
 
         case GroupKind::Ground:
-            return path == "dirt" || path == "coarse_dirt" || path == "rooted_dirt" || path == "grass_block" ||
-                   path == "dirt_path" ||
+            return path == "dirt" || path == "coarse_dirt" || path == "rooted_dirt" ||
+
+                   path == "grass" || path == "grass_block" ||
+
+                   path == "dirt_path" || path == "grass_path" ||
 
                    path == "podzol" || path == "mycelium" ||
 
@@ -524,7 +622,7 @@ namespace {
 
                    path == "mud" || path == "packed_mud" || path == "muddy_mangrove_roots" ||
 
-                   path == "snow" || path == "snow_layer" ||
+                   path == "snow" || path == "snow_layer" || path == "powder_snow" ||
 
                    path == "ice" || path == "packed_ice" || path == "blue_ice" || path == "frosted_ice";
 
@@ -549,13 +647,20 @@ namespace {
                 // Grass / bushes.
                 //
                 path == "short_grass" || path == "tallgrass" || path == "fern" || path == "large_fern" ||
-                path == "deadbush" || path == "bush" || path == "firefly_bush" ||
+                path == "tall_grass" || path == "short_dry_grass" || path == "tall_dry_grass" ||
+                path == "wildflowers" ||
+
+                path == "sapling" ||
+
+                path == "cactus_flower" ||
 
                 //
                 // Flowers.
                 //
-                path == "dandelion" || path == "poppy" || path == "blue_orchid" || path == "allium" ||
-                path == "azure_bluet" || path == "oxeye_daisy" || path == "cornflower" ||
+                path == "dandelion" || path == "poppy" || path == "yellow_flower" || path == "red_flower" ||
+                path == "blue_orchid" ||
+
+                path == "allium" || path == "azure_bluet" || path == "oxeye_daisy" || path == "cornflower" ||
                 path == "lily_of_the_valley" || path == "wither_rose" ||
 
                 path.find("tulip") != std::string_view::npos ||
@@ -593,6 +698,8 @@ namespace {
                 //
                 path == "brown_mushroom" || path == "red_mushroom" ||
 
+                path == "brown_mushroom_block" || path == "red_mushroom_block" ||
+
                 path == "lily_pad";
 
             //
@@ -603,6 +710,8 @@ namespace {
 
         case GroupKind::Farming:
             return path == "wheat" || path == "carrots" || path == "potatoes" || path == "beetroot" ||
+
+                   path == "torchflower_crop" || path == "pitcher_crop" ||
 
                    path == "melon" || path == "melon_stem" ||
 
@@ -659,8 +768,11 @@ namespace {
 
                    path.find("weeping_vines") != std::string_view::npos ||
 
-                   path.find("twisting_vines") != std::string_view::npos;
+                   path.find("twisting_vines") != std::string_view::npos ||
 
+                   path == "portal" || path == "nether_portal" ||
+
+                   path == "dried_ghast";
             //
             // ========================================================
             // END
@@ -699,7 +811,7 @@ namespace {
 
                    path == "sponge" || path == "wet_sponge" ||
 
-                   path == "sea_pickle" || path == "sea_lantern" ||
+                   path == "sea_pickle" ||
 
                    path == "conduit" ||
 
@@ -757,7 +869,24 @@ namespace {
             //
             return path.find("copper") != std::string_view::npos ||
 
-                   path == "lightning_rod";
+                   path.find("lightning_rod") != std::string_view::npos;
+            //
+            // ========================================================
+            // CINNABAR
+            // ========================================================
+            //
+
+        case GroupKind::Cinnabar:
+            return path.find("cinnabar") != std::string_view::npos;
+
+            //
+            // ========================================================
+            // SULFUR
+            // ========================================================
+            //
+
+        case GroupKind::Sulfur:
+            return path.find("sulfur") != std::string_view::npos;
 
             //
             // ========================================================
@@ -786,7 +915,9 @@ namespace {
             //
 
         case GroupKind::Terracotta:
-            return path.find("terracotta") != std::string_view::npos;
+            return path.find("terracotta") != std::string_view::npos ||
+
+                   path == "hardened_clay" || path == "stained_hardened_clay";
 
             //
             // ========================================================
@@ -804,9 +935,11 @@ namespace {
             //
 
         case GroupKind::Lighting:
-            return path == "torch" || path == "redstone_torch" ||
+            return path == "torch" ||
 
                    path == "lantern" || path == "campfire" ||
+
+                   path == "sea_lantern" || path == "shroomlight" ||
 
                    path == "jack_o_lantern" ||
 
@@ -825,6 +958,8 @@ namespace {
         case GroupKind::Redstone:
             return path == "redstone_wire" ||
 
+                   path == "redstone_torch" || path == "redstone_lamp" ||
+
                    path == "observer" ||
 
                    path == "piston" || path == "sticky_piston" ||
@@ -834,6 +969,10 @@ namespace {
                    path == "crafter" ||
 
                    path == "lever" ||
+
+                   path == "tripwire" || path == "tripwire_hook" ||
+
+                   path == "slime_block" ||
 
                    path.ends_with("_button") || path.ends_with("_pressure_plate") ||
 
@@ -845,7 +984,9 @@ namespace {
 
                    path == "target" ||
 
-                   path == "tnt" || path == "note_block";
+                   path == "tnt" ||
+
+                   path == "note_block";
 
             //
             // ========================================================
@@ -898,20 +1039,22 @@ namespace {
             //
 
         case GroupKind::DoorsBarriers:
-            return
-                //
-                // Wood doors stay inside their own wood families.
-                // Copper doors stay inside Copper.
-                //
-                path == "iron_door" || path == "iron_trapdoor" ||
+            return path == "iron_door" || path == "iron_trapdoor" ||
 
-                path == "iron_bars" || path == "chain" ||
+                   path == "iron_bars" || path == "chain" ||
 
-                //
-                // Generic/legacy versions, if shown.
-                //
-                path == "wooden_door" || path == "trapdoor" || path == "fence" || path == "fence_gate";
+                   path == "ladder" ||
 
+                   //
+                   // Specific wood signs already get caught by
+                   // their Wood family because Wood groups occur first.
+                   //
+                   path == "sign" || path == "wall_sign" || path.ends_with("_sign") ||
+
+                   //
+                   // Generic/legacy variants.
+                   //
+                   path == "wooden_door" || path == "trapdoor" || path == "fence" || path == "fence_gate";
             //
             // ========================================================
             // SPECIAL BLOCKS
@@ -919,43 +1062,41 @@ namespace {
             //
 
         case GroupKind::Special:
-            return
-                //
-                // Mob / Trial Chamber blocks.
-                //
-                path == "mob_spawner" || path == "spawner" || path == "trial_spawner" || path == "vault" ||
+            return path == "mob_spawner" || path == "spawner" || path == "trial_spawner" || path == "vault" ||
 
-                //
-                // Archaeology.
-                //
-                path == "suspicious_sand" || path == "suspicious_gravel" || path == "decorated_pot" ||
+                   path == "bee_nest" || path == "beehive" ||
 
-                //
-                // Decorative/special objects.
-                //
-                path == "flower_pot" ||
+                   path == "creaking_heart" || path == "sniffer_egg" ||
 
-                path.find("banner") != std::string_view::npos ||
+                   path == "item_frame" || path == "glow_frame" || path == "jukebox" ||
 
-                path.find("skull") != std::string_view::npos ||
+                   path == "fire" ||
 
-                path.find("_head") != std::string_view::npos ||
+                   path == "suspicious_sand" || path == "suspicious_gravel" || path == "decorated_pot" ||
 
-                path == "bed" || path.ends_with("_bed") ||
+                   path == "flower_pot" ||
 
-                path.find("cake") != std::string_view::npos ||
+                   path.find("banner") != std::string_view::npos ||
 
-                path == "bell" ||
+                   path.find("skull") != std::string_view::npos ||
 
-                path == "cobweb" ||
+                   path.find("_head") != std::string_view::npos ||
 
-                path == "honey_block" || path == "honeycomb_block" ||
+                   path == "bed" || path.ends_with("_bed") ||
 
-                path == "bone_block" ||
+                   path.find("cake") != std::string_view::npos ||
 
-                path.find("resin") != std::string_view::npos ||
+                   path == "bell" ||
 
-                path == "heavy_core";
+                   path == "cobweb" ||
+
+                   path == "honey_block" || path == "honeycomb_block" ||
+
+                   path == "bone_block" ||
+
+                   path.find("resin") != std::string_view::npos ||
+
+                   path == "heavy_core";
 
             //
             // ========================================================
@@ -1127,7 +1268,7 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
         //
 
     case GroupKind::Ground:
-        if (path == "grass_block") return 0;
+        if (path == "grass" || path == "grass_block") return 0;
 
         if (path == "dirt") return 1;
 
@@ -1135,7 +1276,7 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
 
         if (path == "rooted_dirt") return 3;
 
-        if (path == "dirt_path") return 4;
+        if (path == "dirt_path" || path == "grass_path") return 4;
 
         if (path == "podzol") return 5;
 
@@ -1153,13 +1294,21 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
 
         if (path == "packed_mud") return 21;
 
+        if (path == "muddy_mangrove_roots") return 22;
+
         if (path == "snow") return 30;
+
+        if (path == "snow_layer") return 31;
+
+        if (path == "powder_snow") return 32;
 
         if (path == "ice") return 40;
 
         if (path == "packed_ice") return 41;
 
         if (path == "blue_ice") return 42;
+
+        if (path == "frosted_ice") return 43;
 
         return 100;
 
@@ -1224,31 +1373,73 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
         //
 
     case GroupKind::Plants:
-        if (path == "dandelion") return 0;
+        if (path == "dandelion" || path == "yellow_flower") return 0;
 
-        if (path == "poppy") return 1;
+        if (path == "poppy" || path == "red_flower") return 1;
 
         if (path == "blue_orchid") return 2;
 
         if (path == "allium") return 3;
 
-        if (path.find("tulip") != std::string_view::npos) return 4;
+        if (path == "azure_bluet") return 4;
+
+        if (path.find("tulip") != std::string_view::npos) return 5;
+
+        if (path == "oxeye_daisy") return 6;
+
+        if (path == "cornflower") return 7;
+
+        if (path == "lily_of_the_valley") return 8;
+
+        if (path == "wither_rose") return 9;
 
         if (path == "sunflower") return 10;
 
+        if (path == "lilac") return 11;
+
+        if (path == "rose_bush") return 12;
+
+        if (path == "peony") return 13;
+
+        if (path == "pink_petals") return 14;
+
+        if (path == "wildflowers") return 15;
+
+        if (path == "cactus_flower") return 16;
+
         if (path == "short_grass" || path == "tallgrass") return 20;
 
-        if (path == "fern") return 21;
+        if (path == "tall_grass") return 21;
 
-        if (path == "vine" || path == "vines") return 30;
+        if (path == "short_dry_grass") return 22;
 
-        if (path.find("cave_vines") != std::string_view::npos) return 31;
+        if (path == "tall_dry_grass") return 23;
 
-        if (path == "moss_block") return 40;
+        if (path == "fern") return 24;
 
-        if (path == "moss_carpet") return 41;
+        if (path == "large_fern") return 25;
 
-        if (path.find("azalea") != std::string_view::npos) return 50;
+        if (path == "sapling") return 30;
+
+        if (path == "vine" || path == "vines") return 40;
+
+        if (path.find("cave_vines") != std::string_view::npos) return 41;
+
+        if (path == "moss_block") return 50;
+
+        if (path == "moss_carpet") return 51;
+
+        if (path.find("azalea") != std::string_view::npos) return 60;
+
+        if (path == "brown_mushroom") return 70;
+
+        if (path == "red_mushroom") return 71;
+
+        if (path == "brown_mushroom_block") return 72;
+
+        if (path == "red_mushroom_block") return 73;
+
+        if (path == "lily_pad") return 80;
 
         return 100;
 
@@ -1267,9 +1458,21 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
 
         if (path == "beetroot") return 3;
 
+        if (path == "torchflower_crop") return 4;
+
+        if (path == "pitcher_crop") return 5;
+
         if (path == "melon") return 10;
 
-        if (path == "pumpkin") return 11;
+        if (path == "melon_stem") return 11;
+
+        if (path == "pumpkin") return 12;
+
+        if (path == "pumpkin_stem") return 13;
+
+        if (path == "carved_pumpkin") return 14;
+
+        if (path == "lit_pumpkin") return 15;
 
         if (path == "cocoa") return 20;
 
@@ -1277,7 +1480,13 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
 
         if (path == "cactus") return 22;
 
+        if (path == "sweet_berry_bush") return 23;
+
         if (path == "farmland") return 30;
+
+        if (path == "composter") return 31;
+
+        if (path == "hay_block") return 32;
 
         return 100;
 
@@ -1309,6 +1518,10 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
         if (path.starts_with("warped_")) return 21;
 
         if (path == "nether_wart") return 30;
+
+        if (path == "portal" || path == "nether_portal") return 40;
+
+        if (path == "dried_ghast") return 41;
 
         return 100;
 
@@ -1427,7 +1640,57 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
 
         if (path.find("trapdoor") != std::string_view::npos) return 51;
 
-        if (path == "lightning_rod") return 60;
+        if (path.find("lightning_rod") != std::string_view::npos) return 60;
+
+        return 100;
+
+        //
+        // ========================================================
+        // CINNABAR
+        // ========================================================
+        //
+
+    case GroupKind::Cinnabar:
+        if (path == "cinnabar") return 0;
+
+        if (path.find("chiseled") != std::string_view::npos) return 10;
+
+        if (path.find("polished") != std::string_view::npos) return 11;
+
+        if (path.find("brick") != std::string_view::npos) return 20;
+
+        if (path.find("slab") != std::string_view::npos) return 30;
+
+        if (path.find("stairs") != std::string_view::npos) return 31;
+
+        if (path.find("wall") != std::string_view::npos) return 32;
+
+        return 100;
+
+        //
+        // ========================================================
+        // SULFUR
+        // ========================================================
+        //
+
+    case GroupKind::Sulfur:
+        if (path == "sulfur") return 0;
+
+        if (path == "potent_sulfur") return 1;
+
+        if (path == "sulfur_spike") return 2;
+
+        if (path.find("chiseled") != std::string_view::npos) return 10;
+
+        if (path.find("polished") != std::string_view::npos) return 11;
+
+        if (path.find("brick") != std::string_view::npos) return 20;
+
+        if (path.find("slab") != std::string_view::npos) return 30;
+
+        if (path.find("stairs") != std::string_view::npos) return 31;
+
+        if (path.find("wall") != std::string_view::npos) return 32;
 
         return 100;
 
@@ -1474,15 +1737,23 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
 
         if (path == "lantern") return 1;
 
-        if (path == "campfire") return 2;
+        if (path == "sea_lantern") return 2;
 
-        if (path == "jack_o_lantern") return 3;
+        if (path == "shroomlight") return 3;
 
-        if (path.find("froglight") != std::string_view::npos) return 4;
+        if (path == "campfire") return 4;
+
+        if (path == "jack_o_lantern") return 5;
+
+        if (path.find("froglight") != std::string_view::npos) return 6;
 
         if (path == "candle") return 10;
 
-        if (path.ends_with("_candle")) return 11 + colorPriority(path);
+        if (path.ends_with("_candle")) {
+            return 11 + colorPriority(path);
+        }
+
+        if (path.find("candle_cake") != std::string_view::npos) return 40;
 
         return 100;
 
@@ -1495,27 +1766,43 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
     case GroupKind::Redstone:
         if (path == "redstone_wire") return 0;
 
-        if (path == "observer") return 1;
+        if (path == "redstone_torch") return 1;
 
-        if (path == "piston") return 2;
+        if (path == "redstone_lamp") return 2;
 
-        if (path == "sticky_piston") return 3;
+        if (path == "observer") return 3;
 
-        if (path == "hopper") return 4;
+        if (path == "piston") return 4;
 
-        if (path == "dispenser") return 5;
+        if (path == "sticky_piston") return 5;
 
-        if (path == "dropper") return 6;
+        if (path == "slime_block") return 6;
 
-        if (path == "crafter") return 7;
+        if (path == "hopper") return 10;
 
-        if (path.find("repeater") != std::string_view::npos) return 10;
+        if (path == "dispenser") return 11;
 
-        if (path.find("comparator") != std::string_view::npos) return 11;
+        if (path == "dropper") return 12;
 
-        if (path == "lever") return 12;
+        if (path == "crafter") return 13;
 
-        if (path == "target") return 13;
+        if (path.find("repeater") != std::string_view::npos) return 20;
+
+        if (path.find("comparator") != std::string_view::npos) return 21;
+
+        if (path == "lever") return 22;
+
+        if (path == "tripwire") return 23;
+
+        if (path == "tripwire_hook") return 24;
+
+        if (path.find("daylight_detector") != std::string_view::npos) return 25;
+
+        if (path == "target") return 26;
+
+        if (path == "note_block") return 27;
+
+        if (path == "tnt") return 28;
 
         if (path.ends_with("_button")) return 50;
 
@@ -1592,6 +1879,22 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
 
         if (path == "chain") return 3;
 
+        if (path == "ladder") return 4;
+
+        if (path == "sign") return 10;
+
+        if (path == "wall_sign") return 11;
+
+        if (path.ends_with("_sign")) return 12;
+
+        if (path == "wooden_door") return 20;
+
+        if (path == "trapdoor") return 21;
+
+        if (path == "fence") return 22;
+
+        if (path == "fence_gate") return 23;
+
         return 100;
 
         //
@@ -1613,13 +1916,47 @@ int groupPriority(std::string_view path, const GroupDefinition& group) {
 
         if (path == "decorated_pot") return 12;
 
-        if (path == "bell") return 20;
+        if (path == "bee_nest") return 20;
 
-        if (path == "flower_pot") return 21;
+        if (path == "beehive") return 21;
 
-        if (path.find("banner") != std::string_view::npos) return 30;
+        if (path == "creaking_heart") return 22;
 
-        if (path.find("skull") != std::string_view::npos || path.find("_head") != std::string_view::npos) return 31;
+        if (path == "sniffer_egg") return 23;
+
+        if (path == "bell") return 30;
+
+        if (path == "flower_pot") return 31;
+
+        if (path == "item_frame") return 32;
+
+        if (path == "glow_frame") return 33;
+
+        if (path == "jukebox") return 34;
+
+        if (path == "cobweb") return 40;
+
+        if (path == "fire") return 41;
+
+        if (path.find("banner") != std::string_view::npos) return 50;
+
+        if (path.find("skull") != std::string_view::npos || path.find("_head") != std::string_view::npos) {
+            return 51;
+        }
+
+        if (path == "bed" || path.ends_with("_bed")) return 60;
+
+        if (path.find("cake") != std::string_view::npos) return 61;
+
+        if (path == "honey_block") return 70;
+
+        if (path == "honeycomb_block") return 71;
+
+        if (path == "bone_block") return 72;
+
+        if (path.find("resin") != std::string_view::npos) return 73;
+
+        if (path == "heavy_core") return 74;
 
         return 100;
 
@@ -2065,8 +2402,7 @@ void XRayBlockListScreen::onRender(Event&) {
                               selectedOnlyRect.right + helperGap + 95.0f * scale, helperTop + helperHeight };
 
     d2d::Rect technicalRect = { groupedRect.right + helperGap, helperTop,
-                                groupedRect.right + helperGap + 105.0f * scale, helperTop + helperHeight };
-
+                                groupedRect.right + helperGap + 135.0f * scale, helperTop + helperHeight };
     float layoutWidth = 160.0f * scale;
 
     d2d::Rect layoutSelectorRect = { searchRect.right - layoutWidth, helperTop, searchRect.right,
@@ -2158,7 +2494,7 @@ void XRayBlockListScreen::onRender(Event&) {
         playClickSound();
     }
 
-    if (drawButton(technicalRect, L"Technical", showTechnicalBlocks)) {
+    if (drawButton(technicalRect, L"Show Technical", showTechnicalBlocks)) {
         showTechnicalBlocks = !showTechnicalBlocks;
 
         scroll = 0.0f;
